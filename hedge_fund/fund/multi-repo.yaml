@@ -1,0 +1,40 @@
+# The combined fund: every repo in one book.
+#
+#   deep-value        virattt/ai-hedge-fund persona agents (Graham, Buffett, Munger)
+#   multi-agent-desk  TauricResearch/TradingAgents — analysts, bull/bear debate,
+#                     trader and risk team per ticker (TRADINGAGENTS_PYTHON)
+#   earnings-drift    PEAD quant model
+#   macro-odds        live Polymarket/Kalshi odds via pmxt, longshot-bias
+#                     corrected with a prediction-market-analysis calibration
+#
+# Master risk below; NoFx-style guardrails (drawdown breaker, cooldowns,
+# order caps, safe mode) are enforced by the trading desk on top.
+name: multi-repo-fund
+strategies:
+  - name: deep-value
+    weight: 0.35
+    models:
+      - name: graham
+        weight: 2.0
+      - name: buffett
+      - name: munger
+  - name: multi-agent-desk
+    weight: 0.35
+    models:
+      - name: tradingagents
+  - name: earnings-drift
+    weight: 0.15
+    models:
+      - name: pead
+  - name: macro-odds
+    weight: 0.15
+    blend:
+      gross_target: 0.5
+    models:
+      - name: prediction_markets
+risk:
+  max_position_pct: 0.20
+  max_gross_exposure: 1.0
+capital: 100000
+rebalance: weekly
+benchmark: SPY

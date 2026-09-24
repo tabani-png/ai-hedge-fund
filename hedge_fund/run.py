@@ -13,6 +13,22 @@ Usage::
         prints to stdout as JSON (pipe it anywhere); a short human summary
         goes to stderr. Add --out record.json to also write it to a file.
 
+    aihf ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT --broker alpaca
+        Same cycle, but the orders are really sent: --broker paper keeps a
+        persistent local book (~/.hedge-fund/paper/), --broker alpaca trades
+        your Alpaca paper account (ALPACA_API_KEY / ALPACA_SECRET_KEY).
+
+    aihf simulate [--weeks 52] [--serve]
+        The whole stack on a synthetic market, no keys: every analyst, the
+        desk's autopilot, guardrails, paper books, leaderboard.
+
+    aihf calibrate ~/prediction-market-analysis/data/kalshi
+        Fit the longshot-bias correction the prediction-market analyst uses.
+
+    aihf web [--port 8765] [--open]
+        The trading desk: a local web dashboard to preview the agents'
+        trades, approve them, run them on autopilot, and hit a kill switch.
+
     aihf ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT --backtest
         Backtest the mandate: run_cycle looped over history at the mandate's
         rebalance cadence; the full result JSON prints to stdout.
@@ -29,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from datetime import date as _date
 from datetime import timedelta
 from pathlib import Path
@@ -36,10 +53,10 @@ from pathlib import Path
 from rich.console import Console
 
 from hedge_fund.backtesting import backtest_fund
-from hedge_fund.brokers import SimBroker
+from hedge_fund.brokers import AlpacaBroker, PaperBroker, SimBroker
 from hedge_fund.data import CachedDataClient, FDClient
 from hedge_fund.fund import Fund, load_spec, normalize_universe
-from hedge_fund.paths import ensure_mandates_dir
+from hedge_fund.paths import USER_DIR, ensure_mandates_dir
 from hedge_fund.pipeline import run_cycle
 from hedge_fund.tui.keys import apply_credentials
 from hedge_fund.tui.shared import _BACKTEST_WEEKS
@@ -48,6 +65,12 @@ from hedge_fund.tui.shared import _BACKTEST_WEEKS
 def main() -> None:
     apply_credentials()
     ensure_mandates_dir()
+    if len(sys.argv) > 1 and sys.argv[1] == "web":
+        return _web(sys.argv[2:])
+    if len(sys.argv) > 1 and sys.argv[1] == "calibrate":
+        return _calibrate(sys.argv[2:])
+    if len(sys.argv) > 1 and sys.argv[1] == "simulate":
+        return _simulate(sys.argv[2:])
     parser = argparse.ArgumentParser(
         prog="aihf",
         description="Run the AI hedge fund. No arguments: launch the "
@@ -85,6 +108,11 @@ def main() -> None:
         help="LLM the investor agents reason with, e.g. claude-opus-5-5 "
         "(default: HEDGE_FUND_LLM_MODEL env, else the built-in default); quant models "
         "ignore it",
+    )
+    parser.add_argument(
+        "--broker", choices=["sim", "paper", "alpaca"], default="sim",
+        help="where the cycle's orders go: sim (default, nothing kept), paper "
+        "(persistent local book), alpaca (your Alpaca paper account)",
     )
     parser.add_argument("--out", help="also write the record JSON to this file")
     args = parser.parse_args()
@@ -133,7 +161,12 @@ def main() -> None:
         )
         return
 
-    broker = SimBroker(cash=spec.capital)
+    if args.broker == "paper":
+        broker = PaperBroker(USER_DIR / "paper" / f"{spec.name}.json", cash=spec.capital)
+    elif args.broker == "alpaca":
+        broker = AlpacaBroker()
+    else:
+        broker = SimBroker(cash=spec.capital)
 
     with FDClient() as raw:
         fd = CachedDataClient(raw)
@@ -165,6 +198,57 @@ def main() -> None:
     )
     if record.skipped:
         console.print(f"[dim]skipped: {', '.join(s.ticker for s in record.skipped)}[/]")
+
+
+def _web(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(prog="aihf web", description="Launch the trading desk dashboard.")
+    parser.add_argument("--host", default="127.0.0.1", help="bind address (default: localhost only)")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--open", action="store_true", help="open the dashboard in your browser")
+    args = parser.parse_args(argv)
+    from hedge_fund.web import serve
+
+    serve(args.host, args.port, open_browser=args.open)
+
+
+def _simulate(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(
+        prog="aihf simulate",
+        description="Run the whole fund stack (all analysts, desk, guardrails, paper broker) "
+        "week by week on a synthetic market — no API keys needed.")
+    parser.add_argument("--weeks", type=int, default=52)
+    parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--crash-week", type=int, default=40, help="week of a -26%% market crash (-1 for none)")
+    parser.add_argument("--max-drawdown", type=float, default=0.20, help="drawdown breaker threshold (default 0.20)")
+    parser.add_argument("--backtest-weeks", type=int, default=52,
+                        help="backtest each fund over this many weeks before the forward run (0 to skip)")
+    parser.add_argument("--serve", action="store_true", help="open the trading desk on the simulated books afterwards")
+    args = parser.parse_args(argv)
+    from hedge_fund.desk.simulation import print_report, simulate
+
+    report = simulate(args.weeks, args.seed, None if args.crash_week < 0 else args.crash_week,
+                      max_drawdown=args.max_drawdown, backtest_weeks=args.backtest_weeks)
+    print_report(report)
+    if args.serve:
+        from hedge_fund.web import serve
+
+        serve(open_browser=True, desk=report["desk"])
+
+
+def _calibrate(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(
+        prog="aihf calibrate",
+        description="Fit the prediction-market calibration curve (win rate by price) from "
+        "Jon-Becker/prediction-market-analysis's Kalshi dataset. Needs `pip install duckdb`.")
+    parser.add_argument("data_dir", help="the dataset's kalshi directory, holding trades/ and markets/ parquet")
+    args = parser.parse_args(argv)
+    from hedge_fund.predictions import Calibration
+
+    cal = Calibration.fit_kalshi_dataset(args.data_dir)
+    path = cal.save()
+    print(f"fit {len(cal.table)} price buckets from {args.data_dir} -> {path}")
+    for cents in (5, 10, 25, 50, 75, 90, 95):
+        print(f"  market {cents:>2}c  ->  wins {cal(cents / 100):.1%}")
 
 
 if __name__ == "__main__":

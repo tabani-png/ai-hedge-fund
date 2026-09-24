@@ -16,10 +16,15 @@ from hedge_fund.signals.llm_agent import LLMAgent
 from hedge_fund.signals.lynch import LynchAgent
 from hedge_fund.signals.munger import MungerAgent
 from hedge_fund.signals.pead import PEADModel
+from hedge_fund.signals.prediction_markets import PredictionMarketModel
+from hedge_fund.signals.trading_agents import TradingAgentsModel
 
 ALPHA_MODEL_REGISTRY: dict[str, type[AlphaModel]] = {
     # Quant models
     "pead": PEADModel,
+    "prediction_markets": PredictionMarketModel,
+    # A whole multi-agent desk (TauricResearch/TradingAgents) in one seat
+    "tradingagents": TradingAgentsModel,
     # LLM investor agents
     "buffett": BuffettAgent,
     "munger": MungerAgent,
@@ -38,5 +43,7 @@ __all__ = [
     "LynchAgent",
     "DruckenmillerAgent",
     "PEADModel",
+    "PredictionMarketModel",
+    "TradingAgentsModel",
     "ALPHA_MODEL_REGISTRY",
 ]

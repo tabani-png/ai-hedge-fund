@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIHF Trading Desk</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0b0e14; --panel: #121722; --panel2: #171d2b; --line: #232b3d;
+  --text: #e6e9f0; --muted: #8a93a8; --dim: #5d6680;
+  --green: #22c55e; --red: #ef4444; --amber: #f59e0b; --blue: #60a5fa; --violet: #a78bfa;
+  --radius: 10px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+button, input, select { font: inherit; color: inherit; }
+header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 20px;
+  border-bottom: 1px solid var(--line); background: #0d111a; position: sticky; top: 0; z-index: 5; }
+.brand { font-weight: 700; letter-spacing: .02em; margin-right: 8px; }
+.brand span { color: var(--green); }
+.spacer { flex: 1; }
+select, input[type=text], input[type=number], input[type=password], input[type=date] {
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; min-width: 0; }
+select:focus, input:focus { outline: 2px solid #2b3a5c; }
+.btn { border: 1px solid var(--line); background: var(--panel2); border-radius: 8px; padding: 8px 14px;
+  cursor: pointer; font-weight: 600; white-space: nowrap; }
+.btn:hover { border-color: #3a4764; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary { background: #1d4ed8; border-color: #2563eb; }
+.btn.go { background: #15803d; border-color: #16a34a; }
+.btn.danger { background: #7f1d1d; border-color: #b91c1c; }
+.btn.kill { background: var(--red); border-color: var(--red); color: #fff; letter-spacing: .04em; }
+.btn.ghost { background: transparent; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  font-size: 12px; border: 1px solid var(--line); color: var(--muted); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+.dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.dot.warn { background: var(--amber); }
+.dot.off { background: var(--red); }
+main { padding: 16px 20px 40px; display: grid; gap: 16px; max-width: 1500px; margin: 0 auto; }
+.kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.kpi { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.kpi .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.kpi .value { font-size: 22px; font-weight: 700; margin-top: 2px; }
+.kpi .sub { color: var(--muted); font-size: 12px; }
+.grid { display: grid; grid-template-columns: 340px minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.card > h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+  padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.card > h2 .right { margin-left: auto; text-transform: none; letter-spacing: 0; }
+.body { padding: 14px; display: grid; gap: 10px; }
+.stack { display: grid; gap: 12px; }
+label.field { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row > * { flex: 1; }
+.row > .btn { flex: 0 0 auto; }
+.toggle { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; cursor: pointer; }
+.toggle input { accent-color: var(--green); width: 16px; height: 16px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+td.num, th.num { text-align: right; }
+tbody tr:hover { background: #151b28; }
+.pos { color: var(--green); } .neg { color: var(--red); } .muted { color: var(--muted); } .amber { color: var(--amber); }
+.empty { color: var(--dim); padding: 18px 14px; text-align: center; }
+.side { font-weight: 700; font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+.side.buy { background: #14331f; color: var(--green); } .side.sell { background: #3a1616; color: var(--red); }
+.banner { padding: 12px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel2); }
+.banner.approve { border-color: #1e40af; background: #0f1a33; }
+.banner.live { border-color: var(--red); background: #2a0f0f; color: #fecaca; }
+.jobs { display: flex; gap: 6px; overflow-x: auto; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.jobchip { flex: 0 0 auto; cursor: pointer; }
+.jobchip.sel { border-color: var(--blue); color: var(--text); }
+.signal { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel2); }
+.signal summary { cursor: pointer; display: flex; gap: 10px; align-items: center; list-style: none; }
+.signal summary::-webkit-details-marker { display: none; }
+.bar { width: 90px; height: 6px; background: #0b0e14; border-radius: 3px; position: relative; flex: 0 0 auto; }
+.bar i { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.bar::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--dim); }
+.thesis { color: #c7cddb; margin-top: 8px; white-space: pre-wrap; font-size: 13px; }
+.log { max-height: 280px; overflow: auto; font-size: 12.5px; }
+.log div { padding: 5px 14px; border-bottom: 1px solid #1a2130; display: flex; gap: 10px; }
+.log .t { color: var(--dim); flex: 0 0 auto; }
+.log .trade { color: var(--green); } .log .error { color: var(--red); } .log .warn { color: var(--amber); }
+.scroll { max-height: 360px; overflow: auto; }
+.tabs { display: flex; gap: 4px; }
+.tab { padding: 4px 10px; border-radius: 6px; cursor: pointer; color: var(--muted); font-size: 12px; }
+.tab.on { background: var(--panel2); color: var(--text); }
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px;
+  padding: 0; width: min(560px, 94vw); }
+dialog::backdrop { background: rgba(0,0,0,.6); }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--dim);
+  border-top-color: var(--blue); border-radius: 50%; animation: s 0.8s linear infinite; }
+@keyframes s { to { transform: rotate(360deg); } }
+.toast { position: fixed; right: 20px; bottom: 20px; background: var(--panel2); border: 1px solid var(--line);
+  padding: 10px 14px; border-radius: 8px; max-width: 420px; display: none; z-index: 20; }
+.toast.err { border-color: var(--red); }
+@media (max-width: 1200px) { .grid { grid-template-columns: 1fr 1fr; } .grid > :nth-child(2) { grid-column: 1 / -1; order: -1; } }
+@media (max-width: 760px) {
+  header { padding: 10px 16px; position: static; } main { padding: 12px 16px 40px; }
+  .grid { grid-template-columns: 1fr; } .kpis { grid-template-columns: repeat(2, 1fr); }
+  .scroll, .card { overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">AIHF <span>Desk</span></div>
+  <select id="fund" title="Fund mandate"></select>
+  <select id="broker" title="Where orders go"></select>
+  <span class="pill" id="market"><span class="dot"></span><span>market</span></span>
+  <span class="spacer"></span>
+  <select id="model" title="LLM the investor agents reason with"></select>
+  <button class="btn ghost" id="settingsBtn">Settings</button>
+  <button class="btn kill" id="killBtn" title="Stop autopilot, drop proposals, cancel open orders">KILL</button>
+</header>
+
+<main>
+  <div id="liveBanner" class="banner live" hidden>
+    <b>LIVE TRADING.</b> Orders on this broker use real money. Double-check every proposal before approving.
+  </div>
+
+  <section class="kpis">
+    <div class="kpi"><div class="label">Equity</div><div class="value mono" id="kEquity">—</div><div class="sub" id="kEquitySub">&nbsp;</div></div>
+    <div class="kpi"><div class="label">P&amp;L vs start</div><div class="value mono" id="kPnl">—</div><div class="sub" id="kPnlSub">&nbsp;</div></div>
+    <div class="kpi"><div class="label">Cash</div><div class="value mono" id="kCash">—</div><div class="sub" id="kBp">&nbsp;</div></div>
+    <div class="kpi"><div class="label">Positions</div><div class="value mono" id="kPos">—</div><div class="sub" id="kGross">&nbsp;</div></div>
+    <div class="kpi"><div class="label">Autopilot</div><div class="value" id="kAuto">Off</div><div class="sub" id="kAutoSub">&nbsp;</div></div>
+  </section>
+
+  <section class="grid">
+    <!-- LEFT: controls -->
+    <div class="stack">
+      <div class="card">
+        <h2>Run the agents</h2>
+        <div class="body">
+          <label class="field">Tickers
+            <input type="text" id="tickers" placeholder="AAPL, MSFT, NVDA" autocomplete="off">
+          </label>
+          <div class="muted" id="staff" style="font-size:12px"></div>
+          <div class="row">
+            <button class="btn primary" id="previewBtn">Preview trades</button>
+            <button class="btn go" id="runTradeBtn">Run &amp; trade</button>
+          </div>
+          <div class="muted" style="font-size:12px">Preview shows the agents' proposed orders for your approval. Run &amp; trade executes them straight away.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Backtest</h2>
+        <div class="body">
+          <div class="row">
+            <label class="field">From<input type="date" id="btStart"></label>
+            <label class="field">To<input type="date" id="btEnd"></label>
+          </div>
+          <button class="btn primary" id="btRun">Backtest this fund</button>
+          <div class="muted" style="font-size:12px">Replays the fund over history at its rebalance cadence on the same tickers: every agent, blend, and risk limit, point-in-time. Compared against the mandate's benchmark.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Autopilot <span class="right pill" id="apPill"><span class="dot"></span>off</span></h2>
+        <div class="body">
+          <label class="field">Run every (minutes)
+            <input type="number" id="apInterval" min="1" step="1" placeholder="mandate cadence">
+          </label>
+          <label class="toggle"><input type="checkbox" id="apAuto" checked> Execute trades automatically</label>
+          <label class="toggle"><input type="checkbox" id="apHours" checked> Only while the market is open</label>
+          <div class="row">
+            <button class="btn go" id="apStart">Start autopilot</button>
+            <button class="btn" id="apStop">Stop</button>
+          </div>
+          <div class="muted" id="apStatus" style="font-size:12px"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Order ticket</h2>
+        <div class="body">
+          <div class="row">
+            <input type="text" id="oTicker" placeholder="Ticker" style="max-width:110px">
+            <input type="number" id="oQty" min="1" step="1" placeholder="Shares" style="max-width:110px">
+          </div>
+          <div class="row">
+            <button class="btn go" data-side="buy">Buy</button>
+            <button class="btn danger" data-side="sell">Sell</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Guardrails <span class="right pill" id="grPill"><span class="dot on"></span>armed</span></h2>
+        <div class="body">
+          <div class="row">
+            <label class="field">Max drawdown %<input type="number" id="grDd" min="1" max="90" step="1"></label>
+            <label class="field">Orders / day<input type="number" id="grCap" min="1" step="1"></label>
+          </div>
+          <div class="row">
+            <label class="field">Re-entry cooldown (min)<input type="number" id="grCool" min="0" step="15"></label>
+            <label class="field">Safe mode after fails<input type="number" id="grFails" min="1" step="1"></label>
+          </div>
+          <label class="toggle"><input type="checkbox" id="grFlat"> Flatten the book when the drawdown breaker trips</label>
+          <div class="row"><button class="btn" id="grSave">Save limits</button><button class="btn danger" id="grReset">Reset halt</button></div>
+          <div class="muted" id="grStatus" style="font-size:12px"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTER: cycles -->
+    <div class="card" id="cycleCard">
+      <h2>Agent cycles <span class="right muted" id="cycleMeta"></span></h2>
+      <div class="jobs" id="jobs"></div>
+      <div class="body" id="cycle"><div class="empty">No cycles yet. Pick tickers and press <b>Preview trades</b>.</div></div>
+    </div>
+
+    <!-- RIGHT: book -->
+    <div class="stack">
+      <div class="card">
+        <h2>Positions</h2>
+        <div class="scroll"><table class="mono"><thead><tr><th>Ticker</th><th class="num">Shares</th><th class="num">Price</th><th class="num">Value</th><th class="num">P&amp;L</th></tr></thead>
+        <tbody id="positions"></tbody></table></div>
+      </div>
+      <div class="card">
+        <h2>Leaderboard <span class="right muted" style="font-size:12px">local paper books</span></h2>
+        <div id="board" class="scroll"></div>
+      </div>
+      <div class="card">
+        <h2><span class="tabs"><span class="tab on" data-tab="tape">Trades</span><span class="tab" data-tab="log">Activity</span></span></h2>
+        <div id="tape" class="scroll"></div>
+        <div id="log" class="log" hidden></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<dialog id="settings">
+  <div class="card" style="border:0">
+    <h2>Settings <button class="btn ghost right" id="closeSettings">Close</button></h2>
+    <div class="body" id="keysBody"></div>
+    <div class="body" style="border-top:1px solid var(--line)">
+      <div class="muted" style="font-size:12px">Keys are saved to <span class="mono">~/.hedge-fund/.env</span>. Get free Alpaca paper keys at alpaca.markets → Paper Trading → API Keys.</div>
+      <div class="row"><button class="btn danger" id="resetPaper">Reset local paper book</button></div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="killDlg">
+  <div class="card" style="border:0">
+    <h2>Kill switch</h2>
+    <div class="body">
+      <div>Stops autopilot, drops every pending proposal, and cancels open broker orders.</div>
+      <label class="toggle"><input type="checkbox" id="killFlatten"> Also close every position now</label>
+      <div class="row"><button class="btn kill" id="killGo">Stop everything</button><button class="btn" id="killCancel">Cancel</button></div>
+    </div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money = (v, d = 2) => v == null || isNaN(v) ? "—" : (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
+const pct = (v) => v == null || isNaN(v) ? "—" : (v >= 0 ? "+" : "") + (v * 100).toFixed(2) + "%";
+const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+                set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+
+let S = null;           // last /api/state
+let selectedJob = null; // job id shown in the center
+let jobDetail = null;
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : { method: "POST", headers: {"Content-Type": "application/json", "X-AIHF": "1"}, body: JSON.stringify(body) };
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+function toast(msg, err = false) {
+  const t = $("toast"); t.textContent = msg; t.className = "toast" + (err ? " err" : ""); t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 4500);
+}
+const fund = () => $("fund").value;
+const broker = () => $("broker").value;
+const tickers = () => $("tickers").value;
+
+async function refresh() {
+  try {
+    S = await api(`/api/state?fund=${encodeURIComponent(fund() || store.get("fund", ""))}&broker=${encodeURIComponent(broker() || store.get("broker", "paper"))}`);
+  } catch (e) { toast("Desk unreachable: " + e.message, true); return; }
+  renderHeader(); renderAccount(); renderAutopilot(); renderJobs(); renderLog(); renderGuardrails(); renderBoard();
+  const live = ["running", "executing", "awaiting_approval"];
+  if (selectedJob && (!jobDetail || jobDetail.id !== selectedJob || live.includes(jobDetail.status)
+      || live.includes(S.jobs.find((x) => x.id === selectedJob)?.status))) await loadJob(selectedJob, true);
+}
+
+function renderHeader() {
+  const f = $("fund"), cur = f.value || store.get("fund", "");
+  if (f.options.length !== S.funds.length) {
+    f.innerHTML = S.funds.map((x) => `<option value="${esc(x.name)}">${esc(x.name)}</option>`).join("");
+    if (S.funds.some((x) => x.name === cur)) f.value = cur;
+    loadTickers();
+  }
+  const b = $("broker"), bcur = b.value || store.get("broker", "paper");
+  b.innerHTML = Object.entries(S.brokers).map(([k, v]) =>
+    `<option value="${k}" ${v.ready ? "" : "disabled"}>${esc(v.label)}${v.ready ? "" : " (setup needed)"}</option>`).join("");
+  b.value = S.brokers[bcur]?.ready ? bcur : "paper";
+  $("liveBanner").hidden = b.value !== "alpaca-live";
+
+  const m = $("model");
+  if (!m.options.length) m.innerHTML = S.models.map((x) => `<option value="${esc(x.id)}">${esc(x.label)} · ${esc(x.provider)}</option>`).join("");
+  if (document.activeElement !== m) m.value = S.model;
+
+  const spec = S.funds.find((x) => x.name === f.value);
+  $("staff").innerHTML = spec ? spec.strategies.map((s) => `<b>${esc(s.name)}</b>: ${s.models.map(esc).join(", ")}`).join(" · ") + ` · rebalances ${esc(spec.rebalance)}` : "No mandates found in ~/.hedge-fund/mandates.";
+}
+
+function renderAccount() {
+  const a = S.account;
+  const open = a?.market_open;
+  $("market").innerHTML = `<span class="dot ${a ? (open ? "on" : "off") : ""}"></span><span>${a ? (open ? "market open" : "market closed") : "market"}</span>`;
+  if (!a) {
+    ["kEquity", "kPnl", "kCash", "kPos"].forEach((id) => $(id).textContent = "—");
+    $("positions").innerHTML = `<tr><td colspan="5" class="empty">${esc(S.account_error || "No account loaded")}</td></tr>`;
+    $("tape").innerHTML = "";
+    return;
+  }
+  const pnl = a.equity - a.start;
+  $("kEquity").textContent = money(a.equity);
+  $("kEquitySub").textContent = S.brokers[a.broker].label;
+  $("kPnl").textContent = money(pnl); $("kPnl").className = "value mono " + (pnl >= 0 ? "pos" : "neg");
+  $("kPnlSub").textContent = pct(pnl / a.start) + " on " + money(a.start, 0);
+  $("kCash").textContent = money(a.cash);
+  $("kBp").textContent = "buying power " + money(a.buying_power, 0);
+  $("kPos").textContent = a.positions.length;
+  const gross = a.positions.reduce((s, p) => s + Math.abs(p.value || 0), 0);
+  $("kGross").textContent = "gross " + (a.equity ? (gross / a.equity * 100).toFixed(0) : 0) + "% of equity";
+
+  $("positions").innerHTML = a.positions.length ? a.positions.map((p) => `<tr>
+    <td><b>${esc(p.ticker)}</b></td><td class="num ${p.shares < 0 ? "neg" : ""}">${p.shares}</td>
+    <td class="num">${money(p.price)}</td><td class="num">${money(p.value, 0)}</td>
+    <td class="num ${p.pnl == null ? "muted" : p.pnl >= 0 ? "pos" : "neg"}">${p.pnl == null ? "—" : money(p.pnl, 0)}</td></tr>`).join("")
+    : `<tr><td colspan="5" class="empty">Flat — no positions</td></tr>`;
+
+  $("tape").innerHTML = a.tape.length ? `<table class="mono"><tbody>${a.tape.map((t) => `<tr>
+    <td class="muted">${esc((t.time || "").replace("T", " ").slice(5, 16))}</td>
+    <td><span class="side ${t.side}">${t.side.toUpperCase()}</span></td><td><b>${esc(t.ticker)}</b></td>
+    <td class="num">${t.quantity}</td><td class="num">${t.price == null ? "—" : money(t.price)}</td>
+    <td class="muted">${t.status === "filled" ? "" : esc(t.status)}</td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty">No trades yet</div>`;
+}
+
+function renderAutopilot() {
+  const ap = S.autopilot || {};
+  const on = !!ap.enabled;
+  $("apPill").innerHTML = `<span class="dot ${on ? "on" : ""}"></span>${on ? "running" : "off"}`;
+  $("kAuto").textContent = on ? "On" : "Off"; $("kAuto").className = "value " + (on ? "pos" : "muted");
+  $("apStart").disabled = on; $("apStop").disabled = !on;
+  if (on) {
+    const next = Math.max(0, Math.round((ap.next_run * 1000 - Date.now()) / 60000));
+    $("kAutoSub").textContent = `${ap.fund} · ${S.brokers[ap.broker]?.label || ap.broker}`;
+    $("apStatus").innerHTML = `Trading <b>${esc(ap.universe.join(", "))}</b> every ${ap.interval_minutes} min · next check in ~${next} min` +
+      (ap.auto_execute ? "" : " · proposals wait for your approval") + (ap.last_skip ? `<br><span class="amber">Skipped: ${esc(ap.last_skip)}</span>` : "");
+  } else { $("kAutoSub").textContent = "manual mode"; $("apStatus").textContent = ""; }
+}
+
+const STATUS = { running: ["Agents thinking", "warn"], awaiting_approval: ["Needs approval", "warn"], executing: ["Sending orders", "warn"],
+  done: ["Done", "on"], partial: ["Partly filled", "off"], failed: ["Failed", "off"], rejected: ["Rejected", ""], stale: ["Stale", ""] };
+
+function renderJobs() {
+  if (!selectedJob && S.jobs.length) selectedJob = S.jobs[0].id;
+  $("jobs").innerHTML = S.jobs.map((j) => {
+    const [label, cls] = STATUS[j.status] || [j.status, ""];
+    const what = j.kind === "backtest" ? `Backtest ${j.status === "running" && j.progress?.[1] ? j.progress[0] + "/" + j.progress[1] : label}` : label;
+    return `<span class="pill jobchip ${j.id === selectedJob ? "sel" : ""}" data-job="${j.id}"><span class="dot ${cls}"></span>${esc(j.started.slice(11, 16))} ${esc(what)}${j.source === "autopilot" ? " · auto" : ""}</span>`;
+  }).join("");
+  $("jobs").hidden = !S.jobs.length;
+}
+
+async function loadJob(id, quiet) {
+  try { jobDetail = await api(`/api/job?id=${id}`); } catch (e) { if (!quiet) toast(e.message, true); return; }
+  renderCycle();
+}
+
+function convictionBar(v) {
+  const w = Math.min(1, Math.abs(v)) * 45;
+  return `<span class="bar"><i style="${v >= 0 ? `left:50%;width:${w}px;background:var(--green)` : `right:50%;width:${w}px;background:var(--red)`}"></i></span>`;
+}
+
+function renderCycle() {
+  const j = jobDetail; if (!j) return;
+  const [label] = STATUS[j.status] || [j.status];
+  $("cycleMeta").textContent = `${j.fund} · ${j.kind === "backtest" ? `backtest ${j.start} → ${j.end}` : S.brokers[j.broker]?.label || j.broker} · ${j.universe.join(", ")}`;
+  let h = "";
+  if (j.status === "running") h += `<div class="banner"><span class="spin"></span> The agents are researching ${esc(j.universe.join(", "))}… this can take a minute or two.</div>`;
+  if (j.status === "failed" || j.status === "stale") h += `<div class="banner live">${esc(j.error || label)}</div>`;
+  const r = j.record;
+  if (j.kind === "backtest") h += backtestHtml(j);
+  else if (r) h += recordHtml(r, j);
+  $("cycle").innerHTML = h || `<div class="empty">${esc(label)}</div>`;
+  $("approveBtn")?.addEventListener("click", () => act(() => api("/api/approve", { id: j.id }), "Approved — sending orders"));
+  $("rejectBtn")?.addEventListener("click", () => act(() => api("/api/reject", { id: j.id }), "Rejected"));
+  if (j.kind === "backtest") wireBacktest(j);
+}
+
+function recordHtml(r, j) {
+  let h = "";
+  {
+    if (j.status === "awaiting_approval") h += `<div class="banner approve row"><div><b>${r.orders.length} orders proposed.</b> Nothing has been sent yet.</div>
+      <button class="btn go" id="approveBtn">Approve &amp; execute</button><button class="btn" id="rejectBtn">Reject</button></div>`;
+    const results = {}; (j.results || []).forEach((x) => results[x.order.ticker] = x);
+    h += `<table class="mono"><thead><tr><th>Order</th><th>Ticker</th><th class="num">Shares</th><th class="num">Ref price</th><th class="num">Notional</th><th class="num">Target wt</th><th>Result</th></tr></thead><tbody>` +
+      (r.orders.length ? r.orders.map((o) => {
+        const res = results[o.ticker];
+        const out = !res ? `<span class="muted">${j.status === "awaiting_approval" ? "pending" : j.status === "executing" ? "sending…" : "—"}</span>`
+          : res.blocked ? `<span class="amber" title="${esc(res.blocked)}">held by guardrail</span>`
+          : res.error ? `<span class="neg" title="${esc(res.error)}">failed</span>` : `<span class="pos">filled @ ${money(res.fill.price)}</span>`;
+        return `<tr><td><span class="side ${o.side}">${o.side.toUpperCase()}</span></td><td><b>${esc(o.ticker)}</b></td><td class="num">${o.quantity}</td>
+          <td class="num">${money(o.price)}</td><td class="num">${money(o.quantity * o.price, 0)}</td><td class="num">${pct(r.final_weights[o.ticker] || 0)}</td><td>${out}</td></tr>`;
+      }).join("") : `<tr><td colspan="7" class="empty">The book already matches the agents' targets — no trades.</td></tr>`) + `</tbody></table>`;
+    const held = (j.results || []).filter((x) => x.blocked);
+    if (held.length) h += `<div class="banner">${held.map((x) => `Guardrail held ${esc(x.order.side)} ${x.order.quantity} ${esc(x.order.ticker)}: ${esc(x.blocked)}`).join("<br>")}</div>`;
+    const errs = (j.results || []).filter((x) => x.error);
+    if (errs.length) h += `<div class="banner live">${errs.map((x) => `${esc(x.order.side)} ${x.order.quantity} ${esc(x.order.ticker)}: ${esc(x.error)}`).join("<br>")}</div>`;
+    if (r.clamps.length) h += `<div class="muted" style="font-size:12px">Risk clamped: ${r.clamps.map((c) => `${esc(c.ticker || "gross")} ${pct(c.before)} → ${pct(c.after)}`).join(", ")}</div>`;
+    if (r.skipped.length) h += `<div class="muted" style="font-size:12px">Skipped: ${r.skipped.map((s) => `${esc(s.ticker)} (${esc(s.reason)})`).join(", ")}</div>`;
+    h += `<div class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin-top:6px">Why — every agent's call</div>`;
+    for (const sr of r.strategies) {
+      for (const sig of sr.signals) {
+        const abst = sig.metadata?.abstained === true;
+        h += `<details class="signal"><summary>${convictionBar(sig.value)}<span class="mono ${sig.value > 0.05 ? "pos" : sig.value < -0.05 ? "neg" : "muted"}" style="width:48px">${sig.value >= 0 ? "+" : ""}${sig.value.toFixed(2)}</span>
+          <b>${esc(sig.ticker)}</b><span class="muted">${esc(sig.model_name)} · ${esc(sr.name)}${abst ? " · abstained" : ""}</span></summary>
+          <div class="thesis">${esc(sig.reasoning || "No written thesis (quant model).")}</div></details>`;
+      }
+    }
+  }
+  return h;
+}
+
+// ---------------------------------------------------------------- backtests
+const FUND_C = "#3987e5", BENCH_C = "#d95926";  // validated categorical pair on the dark surface
+let btCycle = null;  // {job, i, record} — a drilled-into backtest tick
+
+function backtestHtml(j) {
+  let h = "";
+  const [done, total] = j.progress || [0, 0];
+  if (j.status === "running") h += `<div class="banner"><span class="spin"></span> Backtesting ${esc(j.start)} → ${esc(j.end)}: cycle ${done}${total ? " of " + total : ""}. Every tick is a full agent cycle, so LLM funds take a while.</div>`;
+  const m = j.metrics;
+  if (m) h += `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(110px,1fr))">
+    ${tile("Return", pct(m.total_return_pct), m.total_return_pct >= 0 ? "pos" : "neg", "annualized " + pct(m.annualized_return_pct))}
+    ${tile("Benchmark", pct(m.benchmark_return_pct), m.benchmark_return_pct >= 0 ? "pos" : "neg", "same capital, same dates")}
+    ${tile("Excess", pct(m.excess_return_pct), m.excess_return_pct >= 0 ? "pos" : "neg", "fund minus benchmark")}
+    ${tile("Sharpe", m.sharpe_ratio.toFixed(2), "", "annualized")}
+    ${tile("Max drawdown", pct(-m.max_drawdown_pct), "neg", `${m.n_cycles} cycles · ${m.n_orders} orders`)}</div>`;
+  if ((j.nav || []).length > 1) h += chartHtml(j);
+  if (btCycle && btCycle.job === j.id) {
+    const fills = {}; (btCycle.record.fills || []).forEach((f) => fills[f.ticker] = { order: f, fill: f });
+    h += `<div class="row" style="margin-top:6px"><div><b>Rebalance ${esc(btCycle.record.as_of)}</b> <span class="muted">— NAV ${money(btCycle.record.nav, 0)}</span></div>
+      <button class="btn ghost" id="btBack">Back to all rebalances</button></div>` + recordHtml(btCycle.record, { status: "done", results: Object.values(fills) });
+  } else if ((j.cycles || []).length) {
+    h += `<div class="muted" style="font-size:12px;margin-top:4px">Every rebalance${j.status === "done" ? " — click one to see its orders and each agent's thesis" : ""}</div>
+      <div class="scroll"><table class="mono"><thead><tr><th>Date</th><th class="num">NAV</th><th class="num">Orders</th><th class="num">Net</th><th class="num">Gross</th><th>Largest positions</th></tr></thead><tbody>` +
+      j.cycles.map((c, i) => `<tr data-bt="${i}" style="cursor:${j.status === "done" ? "pointer" : "default"}"><td>${esc(c.date)}</td><td class="num">${money(c.nav, 0)}</td><td class="num">${c.orders}</td>
+        <td class="num ${c.net >= 0 ? "pos" : "neg"}">${pct(c.net)}</td><td class="num">${(c.gross * 100).toFixed(0)}%</td>
+        <td>${c.top.map(([t, w]) => `<span class="${w >= 0 ? "pos" : "neg"}">${esc(t)} ${(w * 100).toFixed(0)}%</span>`).join(" · ")}</td></tr>`).reverse().join("") + `</tbody></table></div>`;
+  }
+  return h;
+}
+
+function tile(label, value, cls, sub) {
+  return `<div class="kpi"><div class="label">${label}</div><div class="value mono ${cls}" style="font-size:18px">${value}</div><div class="sub">${esc(sub)}</div></div>`;
+}
+
+function chartHtml(j) {
+  const W = 640, H = 230, L = 64, R = 70, T = 12, B = 26;
+  const nav = j.nav, bench = j.benchmark_nav.map((v) => v ?? NaN);
+  const vals = nav.concat(bench.filter((v) => !isNaN(v)));
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
+  const x = (i) => L + (W - L - R) * (nav.length === 1 ? 0 : i / (nav.length - 1));
+  const y = (v) => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  const path = (arr) => arr.map((v, i) => isNaN(v) ? "" : `${i && !isNaN(arr[i - 1]) ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  const ticks = [lo + pad, (lo + hi) / 2, hi - pad];
+  const n = nav.length - 1, lastB = bench[bench.length - 1];
+  const label = (v, c, txt, dy) => `<text x="${W - R + 6}" y="${(y(v) + dy).toFixed(1)}" fill="var(--text)" font-size="11"><tspan fill="${c}">■</tspan> ${txt}</text>`;
+  const gap = Math.abs(y(nav[n]) - y(lastB)) < 14 ? (y(nav[n]) < y(lastB) ? [-4, 10] : [10, -4]) : [4, 4];
+  return `<div id="btChartWrap" style="position:relative">
+    <div class="row" style="font-size:12px;color:var(--muted);gap:14px;flex:0">
+      <span style="flex:0;white-space:nowrap"><svg width="18" height="8"><line x1="0" y1="4" x2="18" y2="4" stroke="${FUND_C}" stroke-width="2"/></svg> ${esc(j.fund)}</span>
+      <span style="flex:0;white-space:nowrap"><svg width="18" height="8"><line x1="0" y1="4" x2="18" y2="4" stroke="${BENCH_C}" stroke-width="2" stroke-dasharray="4 3"/></svg> Benchmark</span></div>
+    <svg id="btChart" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="Fund NAV versus benchmark over the backtest">
+      ${ticks.map((t) => `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${L - 6}" y="${y(t) + 4}" text-anchor="end" fill="var(--muted)" font-size="11">${money(t, 0)}</text>`).join("")}
+      <text x="${L}" y="${H - 6}" fill="var(--muted)" font-size="11">${esc(j.dates[0])}</text>
+      <text x="${W - R}" y="${H - 6}" fill="var(--muted)" font-size="11" text-anchor="end">${esc(j.dates[n])}</text>
+      <path d="${path(bench)}" fill="none" stroke="${BENCH_C}" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>
+      <path d="${path(nav)}" fill="none" stroke="${FUND_C}" stroke-width="2" stroke-linejoin="round"/>
+      ${label(nav[n], FUND_C, money(nav[n], 0), gap[0])}${isNaN(lastB) ? "" : label(lastB, BENCH_C, money(lastB, 0), gap[1])}
+      <line id="btX" y1="${T}" y2="${H - B}" stroke="var(--dim)" visibility="hidden"/>
+      <circle id="btDf" r="4" fill="${FUND_C}" stroke="var(--panel)" stroke-width="2" visibility="hidden"/>
+      <circle id="btDb" r="4" fill="${BENCH_C}" stroke="var(--panel)" stroke-width="2" visibility="hidden"/>
+      <rect id="btHit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/>
+    </svg>
+    <div id="btTip" class="banner mono" style="position:absolute;pointer-events:none;display:none;font-size:12px;padding:6px 10px;white-space:nowrap"></div>
+  </div>`;
+}
+
+function wireBacktest(j) {
+  const hit = $("btHit");
+  if (hit) {
+    const svg = $("btChart"), n = j.nav.length - 1;
+    const show = (ev) => {
+      const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+      const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+      const L = 64, W = 640 - 70;
+      const i = Math.max(0, Math.min(n, Math.round((p.x - L) / (W - L) * n)));
+      const xi = L + (W - L) * (n ? i / n : 0);
+      const b = j.benchmark_nav[i];
+      [["btX", null], ["btDf", j.nav[i]], ["btDb", b]].forEach(([id, v]) => {
+        const el = $(id); el.setAttribute("visibility", v === undefined || (id !== "btX" && v == null) ? "hidden" : "visible");
+        if (id === "btX") { el.setAttribute("x1", xi); el.setAttribute("x2", xi); }
+        else if (v != null) { el.setAttribute("cx", xi); el.setAttribute("cy", yOf(j, v)); }
+      });
+      const tip = $("btTip"), wrap = $("btChartWrap").getBoundingClientRect();
+      tip.innerHTML = `${esc(j.dates[i])}<br><span style="color:${FUND_C}">■</span> fund ${money(j.nav[i], 0)}` +
+        (b != null ? `<br><span style="color:${BENCH_C}">■</span> bench ${money(b, 0)}` : "") + `<br>${j.cycles[i] ? j.cycles[i].orders + " orders" : ""}`;
+      tip.style.display = "block";
+      const left = ev.clientX - wrap.left + 14;
+      tip.style.left = Math.min(left, wrap.width - tip.offsetWidth - 4) + "px"; tip.style.top = "30px";
+    };
+    hit.addEventListener("mousemove", show);
+    hit.addEventListener("mouseleave", () => { ["btX", "btDf", "btDb"].forEach((id) => $(id).setAttribute("visibility", "hidden")); $("btTip").style.display = "none"; });
+  }
+  $("cycle").querySelectorAll("[data-bt]").forEach((row) => row.onclick = async () => {
+    if (j.status !== "done") return;
+    const i = +row.dataset.bt;
+    try { btCycle = { job: j.id, i, record: await api(`/api/backtest-cycle?id=${j.id}&i=${i}`) }; renderCycle(); }
+    catch (e) { toast(e.message, true); }
+  });
+  $("btBack")?.addEventListener("click", () => { btCycle = null; renderCycle(); });
+}
+
+function yOf(j, v) {
+  const H = 230, T = 12, B = 26;
+  const vals = j.nav.concat(j.benchmark_nav.filter((x) => x != null));
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
+  return T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+}
+
+function renderGuardrails() {
+  const g = S.guardrails; if (!g) return;
+  const halted = g.state.tripped;
+  $("grPill").innerHTML = `<span class="dot ${halted ? "off" : "on"}"></span>${halted ? "HALTED" : "armed"}`;
+  const set = (id, v) => { if (document.activeElement !== $(id)) $(id).value = v; };
+  set("grDd", Math.round(g.limits.max_drawdown_pct * 100)); set("grCap", g.limits.max_orders_per_day);
+  set("grCool", g.limits.reentry_cooldown_minutes); set("grFails", g.limits.safe_mode_after_failures);
+  if (document.activeElement !== $("grFlat")) $("grFlat").checked = g.limits.flatten_on_drawdown;
+  $("grReset").disabled = !halted;
+  $("grStatus").innerHTML = (halted ? `<span class="neg">${esc(halted)}</span><br>` : "") +
+    `${g.state.orders_today}/${g.limits.max_orders_per_day} orders today · peak equity ${g.state.peak_equity ? money(g.state.peak_equity, 0) : "—"}` +
+    (g.state.consecutive_failures ? ` · ${g.state.consecutive_failures} failed cycles in a row` : "");
+}
+
+function renderBoard() {
+  const b = S.leaderboard || [];
+  $("board").innerHTML = b.length ? `<table class="mono"><thead><tr><th>#</th><th>Fund</th><th class="num">Equity</th><th class="num">Return</th></tr></thead><tbody>${b.map((r, i) => `<tr>
+    <td class="muted">${i + 1}</td><td><b>${esc(r.fund)}</b>${r.halted ? ' <span class="neg">halted</span>' : ""}</td><td class="num">${money(r.equity, 0)}</td>
+    <td class="num ${r.return >= 0 ? "pos" : "neg"}">${pct(r.return)}</td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty">Run funds on Local paper to rank them here</div>`;
+}
+
+function renderLog() {
+  $("log").innerHTML = S.log.length ? S.log.map((l) => `<div class="${l.level}"><span class="t mono">${esc(l.time.slice(11))}</span><span>${esc(l.message)}</span></div>`).join("") : `<div class="empty">Quiet so far</div>`;
+}
+
+async function act(fn, ok) {
+  try { const out = await fn(); if (ok) toast(ok); await refresh(); return out; } catch (e) { toast(e.message, true); }
+}
+
+function loadTickers() { $("tickers").value = store.get("tickers:" + fund(), "AAPL, MSFT, NVDA"); }
+
+async function startCycle(auto) {
+  if (!tickers().trim()) return toast("Add at least one ticker", true);
+  if (auto && broker() === "alpaca-live" && !confirm("Execute agent trades with REAL money?")) return;
+  store.set("tickers:" + fund(), tickers());
+  const out = await act(() => api("/api/cycle", { fund: fund(), broker: broker(), tickers: tickers(), auto_execute: auto }),
+    auto ? "Agents running — trades will execute when they finish" : "Agents running — you'll approve the orders");
+  if (out) { selectedJob = out.job; await loadJob(out.job); renderJobs(); }
+}
+
+$("previewBtn").onclick = () => startCycle(false);
+(() => { const end = new Date(), start = new Date(Date.now() - 78 * 7 * 864e5);
+  $("btEnd").value = end.toISOString().slice(0, 10); $("btStart").value = start.toISOString().slice(0, 10); })();
+$("btRun").onclick = async () => {
+  if (!tickers().trim()) return toast("Add at least one ticker", true);
+  store.set("tickers:" + fund(), tickers());
+  const out = await act(() => api("/api/backtest", { fund: fund(), tickers: tickers(), start: $("btStart").value, end: $("btEnd").value }), "Backtest started");
+  if (out) { selectedJob = out.job; btCycle = null; await loadJob(out.job); renderJobs(); }
+};
+$("runTradeBtn").onclick = () => startCycle(true);
+$("fund").onchange = () => { store.set("fund", fund()); loadTickers(); refresh(); };
+$("broker").onchange = () => { store.set("broker", broker()); refresh(); };
+$("model").onchange = (e) => act(() => api("/api/model", { model: e.target.value }), "Agents will use " + e.target.selectedOptions[0].text);
+$("jobs").onclick = (e) => { const c = e.target.closest("[data-job]"); if (c) { selectedJob = c.dataset.job; renderJobs(); loadJob(selectedJob); } };
+
+$("apStart").onclick = () => {
+  if (!tickers().trim()) return toast("Add at least one ticker", true);
+  if (broker() === "alpaca-live" && $("apAuto").checked && !confirm("Let autopilot trade REAL money unattended?")) return;
+  store.set("tickers:" + fund(), tickers());
+  act(() => api("/api/autopilot", { action: "start", fund: fund(), broker: broker(), tickers: tickers(),
+    interval_minutes: $("apInterval").value, auto_execute: $("apAuto").checked, market_hours_only: $("apHours").checked }), "Autopilot started");
+};
+$("apStop").onclick = () => act(() => api("/api/autopilot", { action: "stop" }), "Autopilot stopped");
+
+document.querySelectorAll("[data-side]").forEach((b) => b.onclick = () => {
+  const t = $("oTicker").value.trim(), q = parseInt($("oQty").value, 10);
+  if (!t || !(q > 0)) return toast("Ticker and share count required", true);
+  if (broker() === "alpaca-live" && !confirm(`${b.dataset.side.toUpperCase()} ${q} ${t} with REAL money?`)) return;
+  act(async () => { const r = await api("/api/order", { fund: fund(), broker: broker(), ticker: t, side: b.dataset.side, quantity: q });
+    if (r.error) throw new Error(r.error); return r; }, `${b.dataset.side} ${q} ${t.toUpperCase()} sent`);
+});
+
+document.querySelectorAll(".tab").forEach((t) => t.onclick = () => {
+  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x === t));
+  $("tape").hidden = t.dataset.tab !== "tape"; $("log").hidden = t.dataset.tab !== "log";
+});
+
+$("grSave").onclick = () => act(() => api("/api/guardrails", { fund: fund(), limits: {
+  max_drawdown_pct: $("grDd").value / 100, max_orders_per_day: $("grCap").value, reentry_cooldown_minutes: $("grCool").value,
+  safe_mode_after_failures: $("grFails").value, flatten_on_drawdown: $("grFlat").checked } }), "Guardrail limits saved");
+$("grReset").onclick = () => { if (confirm("Clear the halt and let the agents trade again?")) act(() => api("/api/guardrails", { fund: fund(), action: "reset" }), "Halt cleared"); };
+
+$("killBtn").onclick = () => $("killDlg").showModal();
+$("killCancel").onclick = () => $("killDlg").close();
+$("killGo").onclick = async () => { $("killDlg").close();
+  await act(() => api("/api/kill", { fund: fund(), broker: broker(), flatten: $("killFlatten").checked }), "Kill switch engaged"); };
+
+$("settingsBtn").onclick = () => {
+  $("keysBody").innerHTML = Object.entries(S.keys).map(([k, v]) => `<label class="field">${esc(k)}
+    <div class="row"><input type="password" data-key="${esc(k)}" placeholder="${v ? esc(v) : "not set"}" autocomplete="off"><button class="btn" data-save="${esc(k)}">Save</button></div></label>`).join("");
+  $("keysBody").querySelectorAll("[data-save]").forEach((b) => b.onclick = () => {
+    const input = $("keysBody").querySelector(`[data-key="${b.dataset.save}"]`);
+    act(() => api("/api/keys", { name: b.dataset.save, value: input.value }), b.dataset.save + " saved").then(() => { input.value = ""; $("settings").close(); });
+  });
+  $("settings").showModal();
+};
+$("closeSettings").onclick = () => $("settings").close();
+$("resetPaper").onclick = () => { if (confirm(`Reset the local paper book for ${fund()} to its starting capital?`))
+  act(() => api("/api/reset-paper", { fund: fund() }), "Paper book reset"); };
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# Multi-agent desk — TauricResearch/TradingAgents as a pod: analysts, a
+# bull/bear debate, a trader, and a risk team per ticker, signing off with a
+# five-tier rating. Runs in its own venv (TRADINGAGENTS_PYTHON).
+name: multi-agent-desk
+display_name: Multi-Agent Desk
+models:
+  - name: tradingagents
+blend:
+  method: conviction_weighted
+  gross_target: 1.0

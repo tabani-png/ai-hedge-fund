@@ -41,6 +41,8 @@ DISPLAY_NAMES = {
     "lynch": "Peter Lynch",
     "druckenmiller": "Stanley Druckenmiller",
     "pead": "post-earnings drift",
+    "tradingagents": "TradingAgents desk",
+    "prediction_markets": "prediction-market odds",
 }
 
 _SHORT_NAMES = {
@@ -50,6 +52,8 @@ _SHORT_NAMES = {
     "lynch": "Lynch",
     "druckenmiller": "Druckenmiller",
     "pead": "PEAD",
+    "tradingagents": "TradingAgents",
+    "prediction_markets": "Odds",
 }
 
 # The LLM the investor agents reason with. Picked once, upfront; make_llm()
