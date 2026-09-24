@@ -87,8 +87,8 @@ can be backtested and combined — is a great first contribution:
 | Risk model — hard caps (pod-level budgets + fund-level limits) | 🚧 (fund-level position + gross caps ship; pod budgets with pods) |
 | Broker protocol — pluggable, mirrors the `DataClient` pattern | ✅ |
 | ↳ Simulated broker (backtest) | ✅ |
-| ↳ Paper broker | ⬜ |
-| ↳ Live broker (Interactive Brokers / Alpaca) — opt-in plugin, off by default | ⬜ |
+| ↳ Paper broker | ✅ (persistent local book: `--broker paper` and the trading desk) |
+| ↳ Live broker (Interactive Brokers / Alpaca) — opt-in plugin, off by default | 🚧 (Alpaca paper, and live behind `ALPACA_LIVE=1`; IBKR next) |
 
 ## Autonomy
 
@@ -108,7 +108,7 @@ Thin clients over the engine — pick the surface, the core stays the same.
 |------|--------|
 | TUI — the main interface (Textual): build a fund, run it as of today, backtest it, browse every signal's thesis, fund history + delete, model picker, in-app API-key setup | 🚧 (ships and is the default `python -m v2.run`; streaming reasoning + watch mode remain) |
 | CLI — thin machine client over the engine: `python -m v2.run mandate.yaml --tickers … [--backtest]`, JSON on stdout | ✅ |
-| Web dashboard — replayable, time-scrubbable reasoning ledger | 🚧 (frontend scaffold exists; still runs on the v1 engine) |
+| Web dashboard — replayable, time-scrubbable reasoning ledger | 🚧 (`aihf web` trading desk ships: preview/approve/execute, autopilot, kill switch; replay next) |
 | Conversational control plane — operate the fund in natural language | ⬜ |
 
 ## Data

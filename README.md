@@ -4,7 +4,7 @@ This is a proof of concept for an AI-powered hedge fund. The goal of this projec
 
 > **🚧 The project is evolving.** We're rebuilding it into a persistent, always-on AI hedge fund — a *fund* as a first-class entity you can backtest, paper-trade, and (opt-in) run live, with the investor agents reimagined as pluggable, backtestable "alpha models." Read the **[Vision →](VISION.md)** and the **[Roadmap →](ROADMAP.md)**.
 
-Note: the system does not actually make any trades.
+Trades only happen when you ask: every run defaults to a simulated broker. The trading desk (below) can send the agents' orders to a persistent local paper book or to an Alpaca account.
 
 [![Twitter Follow](https://img.shields.io/twitter/follow/virattt?style=social)](https://twitter.com/virattt)
 
@@ -74,6 +74,30 @@ aihf ~/.hedge-fund/mandates/example.yaml --tickers AAPL,MSFT --backtest
 ```
 
 A mandate is the desk — strategies, staff, risk, capital, cadence — and never names tickers; `--tickers` says what to point it at for this run.
+
+### Trading desk (web UI)
+
+```bash
+aihf web --open        # http://127.0.0.1:8765
+```
+
+A local dashboard that lets the agents trade:
+
+- **Preview trades**: the agents research your tickers and propose orders. Nothing is sent until you press **Approve & execute**.
+- **Run & trade**: research and execute in one step.
+- **Autopilot**: runs the fund every N minutes (default: the mandate's rebalance cadence), only while the market is open, and executes automatically or waits for your approval.
+- **KILL**: stops autopilot, drops pending proposals, cancels open orders, and can optionally flatten every position.
+- Live equity, P&L, positions, trade tape, activity log, a manual order ticket, each agent's conviction and written thesis, and an in-app key manager.
+
+Brokers:
+
+| Broker | What it is | Setup |
+|--------|-----------|-------|
+| Local paper | A persistent simulated book in `~/.hedge-fund/paper/` | none |
+| Alpaca paper | Real market fills with fake money | `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` (free at alpaca.markets) |
+| Alpaca live | **Real money** | the same keys, plus `ALPACA_LIVE=1` when you launch |
+
+The CLI can use the same brokers: `aihf mandate.yaml --tickers AAPL,MSFT --broker paper` (or `--broker alpaca`).
 
 ## Development
 

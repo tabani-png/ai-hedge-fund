@@ -23,6 +23,14 @@ class SimBroker:
         self._cash = cash
         self._shares: dict[str, int] = {}
 
+    @classmethod
+    def from_book(cls, cash: float, positions: dict[str, Position]) -> "SimBroker":
+        """A SimBroker holding a copy of another broker's book — the dry run
+        a live cycle previews its orders against before anything is sent."""
+        broker = cls(cash=cash)
+        broker._shares = {t: p.shares for t, p in positions.items() if p.shares != 0}
+        return broker
+
     def positions(self) -> dict[str, Position]:
         return {
             t: Position(ticker=t, shares=s)

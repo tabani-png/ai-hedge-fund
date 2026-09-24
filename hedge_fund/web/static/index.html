@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIHF Trading Desk</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  --bg: #0b0e14; --panel: #121722; --panel2: #171d2b; --line: #232b3d;
+  --text: #e6e9f0; --muted: #8a93a8; --dim: #5d6680;
+  --green: #22c55e; --red: #ef4444; --amber: #f59e0b; --blue: #60a5fa; --violet: #a78bfa;
+  --radius: 10px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+button, input, select { font: inherit; color: inherit; }
+header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 20px;
+  border-bottom: 1px solid var(--line); background: #0d111a; position: sticky; top: 0; z-index: 5; }
+.brand { font-weight: 700; letter-spacing: .02em; margin-right: 8px; }
+.brand span { color: var(--green); }
+.spacer { flex: 1; }
+select, input[type=text], input[type=number], input[type=password] {
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; min-width: 0; }
+select:focus, input:focus { outline: 2px solid #2b3a5c; }
+.btn { border: 1px solid var(--line); background: var(--panel2); border-radius: 8px; padding: 8px 14px;
+  cursor: pointer; font-weight: 600; white-space: nowrap; }
+.btn:hover { border-color: #3a4764; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary { background: #1d4ed8; border-color: #2563eb; }
+.btn.go { background: #15803d; border-color: #16a34a; }
+.btn.danger { background: #7f1d1d; border-color: #b91c1c; }
+.btn.kill { background: var(--red); border-color: var(--red); color: #fff; letter-spacing: .04em; }
+.btn.ghost { background: transparent; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  font-size: 12px; border: 1px solid var(--line); color: var(--muted); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+.dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.dot.warn { background: var(--amber); }
+.dot.off { background: var(--red); }
+main { padding: 16px 20px 40px; display: grid; gap: 16px; max-width: 1500px; margin: 0 auto; }
+.kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.kpi { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.kpi .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.kpi .value { font-size: 22px; font-weight: 700; margin-top: 2px; }
+.kpi .sub { color: var(--muted); font-size: 12px; }
+.grid { display: grid; grid-template-columns: 340px minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.card > h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+  padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.card > h2 .right { margin-left: auto; text-transform: none; letter-spacing: 0; }
+.body { padding: 14px; display: grid; gap: 10px; }
+.stack { display: grid; gap: 12px; }
+label.field { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row > * { flex: 1; }
+.row > .btn { flex: 0 0 auto; }
+.toggle { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; cursor: pointer; }
+.toggle input { accent-color: var(--green); width: 16px; height: 16px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+td.num, th.num { text-align: right; }
+tbody tr:hover { background: #151b28; }
+.pos { color: var(--green); } .neg { color: var(--red); } .muted { color: var(--muted); } .amber { color: var(--amber); }
+.empty { color: var(--dim); padding: 18px 14px; text-align: center; }
+.side { font-weight: 700; font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+.side.buy { background: #14331f; color: var(--green); } .side.sell { background: #3a1616; color: var(--red); }
+.banner { padding: 12px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel2); }
+.banner.approve { border-color: #1e40af; background: #0f1a33; }
+.banner.live { border-color: var(--red); background: #2a0f0f; color: #fecaca; }
+.jobs { display: flex; gap: 6px; overflow-x: auto; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.jobchip { flex: 0 0 auto; cursor: pointer; }
+.jobchip.sel { border-color: var(--blue); color: var(--text); }
+.signal { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel2); }
+.signal summary { cursor: pointer; display: flex; gap: 10px; align-items: center; list-style: none; }
+.signal summary::-webkit-details-marker { display: none; }
+.bar { width: 90px; height: 6px; background: #0b0e14; border-radius: 3px; position: relative; flex: 0 0 auto; }
+.bar i { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.bar::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--dim); }
+.thesis { color: #c7cddb; margin-top: 8px; white-space: pre-wrap; font-size: 13px; }
+.log { max-height: 280px; overflow: auto; font-size: 12.5px; }
+.log div { padding: 5px 14px; border-bottom: 1px solid #1a2130; display: flex; gap: 10px; }
+.log .t { color: var(--dim); flex: 0 0 auto; }
+.log .trade { color: var(--green); } .log .error { color: var(--red); } .log .warn { color: var(--amber); }
+.scroll { max-height: 360px; overflow: auto; }
+.tabs { display: flex; gap: 4px; }
+.tab { padding: 4px 10px; border-radius: 6px; cursor: pointer; color: var(--muted); font-size: 12px; }
+.tab.on { background: var(--panel2); color: var(--text); }
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px;
+  padding: 0; width: min(560px, 94vw); }
+dialog::backdrop { background: rgba(0,0,0,.6); }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--dim);
+  border-top-color: var(--blue); border-radius: 50%; animation: s 0.8s linear infinite; }
+@keyframes s { to { transform: rotate(360deg); } }
+.toast { position: fixed; right: 20px; bottom: 20px; background: var(--panel2); border: 1px solid var(--line);
+  padding: 10px 14px; border-radius: 8px; max-width: 420px; display: none; z-index: 20; }
+.toast.err { border-color: var(--red); }
+@media (max-width: 1200px) { .grid { grid-template-columns: 1fr 1fr; } .grid > :nth-child(2) { grid-column: 1 / -1; order: -1; } }
+@media (max-width: 760px) {
+  header { padding: 10px 16px; position: static; } main { padding: 12px 16px 40px; }
+  .grid { grid-template-columns: 1fr; } .kpis { grid-template-columns: repeat(2, 1fr); }
+  .scroll, .card { overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">AIHF <span>Desk</span></div>
+  <select id="fund" title="Fund mandate"></select>
+  <select id="broker" title="Where orders go"></select>
+  <span class="pill" id="market"><span class="dot"></span><span>market</span></span>
+  <span class="spacer"></span>
+  <select id="model" title="LLM the investor agents reason with"></select>
+  <button class="btn ghost" id="settingsBtn">Settings</button>
+  <button class="btn kill" id="killBtn" title="Stop autopilot, drop proposals, cancel open orders">KILL</button>
+</header>
+
+<main>
+  <div id="liveBanner" class="banner live" hidden>
+    <b>LIVE TRADING.</b> Orders on this broker use real money. Double-check every proposal before approving.
+  </div>
+
+  <section class="kpis">
+    <div class="kpi"><div class="label">Equity</div><div class="value mono" id="kEquity">—</div><div class="sub" id="kEquitySub">&nbsp;</div></div>
+    <div class="kpi"><div class="label">P&amp;L vs start</div><div class="value mono" id="kPnl">—</div><div class="sub" id="kPnlSub">&nbsp;</div></div>
+    <div class="kpi"><div class="label">Cash</div><div class="value mono" id="kCash">—</div><div class="sub" id="kBp">&nbsp;</div></div>
+    <div class="kpi"><div class="label">Positions</div><div class="value mono" id="kPos">—</div><div class="sub" id="kGross">&nbsp;</div></div>
+    <div class="kpi"><div class="label">Autopilot</div><div class="value" id="kAuto">Off</div><div class="sub" id="kAutoSub">&nbsp;</div></div>
+  </section>
+
+  <section class="grid">
+    <!-- LEFT: controls -->
+    <div class="stack">
+      <div class="card">
+        <h2>Run the agents</h2>
+        <div class="body">
+          <label class="field">Tickers
+            <input type="text" id="tickers" placeholder="AAPL, MSFT, NVDA" autocomplete="off">
+          </label>
+          <div class="muted" id="staff" style="font-size:12px"></div>
+          <div class="row">
+            <button class="btn primary" id="previewBtn">Preview trades</button>
+            <button class="btn go" id="runTradeBtn">Run &amp; trade</button>
+          </div>
+          <div class="muted" style="font-size:12px">Preview shows the agents' proposed orders for your approval. Run &amp; trade executes them straight away.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Autopilot <span class="right pill" id="apPill"><span class="dot"></span>off</span></h2>
+        <div class="body">
+          <label class="field">Run every (minutes)
+            <input type="number" id="apInterval" min="1" step="1" placeholder="mandate cadence">
+          </label>
+          <label class="toggle"><input type="checkbox" id="apAuto" checked> Execute trades automatically</label>
+          <label class="toggle"><input type="checkbox" id="apHours" checked> Only while the market is open</label>
+          <div class="row">
+            <button class="btn go" id="apStart">Start autopilot</button>
+            <button class="btn" id="apStop">Stop</button>
+          </div>
+          <div class="muted" id="apStatus" style="font-size:12px"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Order ticket</h2>
+        <div class="body">
+          <div class="row">
+            <input type="text" id="oTicker" placeholder="Ticker" style="max-width:110px">
+            <input type="number" id="oQty" min="1" step="1" placeholder="Shares" style="max-width:110px">
+          </div>
+          <div class="row">
+            <button class="btn go" data-side="buy">Buy</button>
+            <button class="btn danger" data-side="sell">Sell</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTER: cycles -->
+    <div class="card" id="cycleCard">
+      <h2>Agent cycles <span class="right muted" id="cycleMeta"></span></h2>
+      <div class="jobs" id="jobs"></div>
+      <div class="body" id="cycle"><div class="empty">No cycles yet. Pick tickers and press <b>Preview trades</b>.</div></div>
+    </div>
+
+    <!-- RIGHT: book -->
+    <div class="stack">
+      <div class="card">
+        <h2>Positions</h2>
+        <div class="scroll"><table class="mono"><thead><tr><th>Ticker</th><th class="num">Shares</th><th class="num">Price</th><th class="num">Value</th><th class="num">P&amp;L</th></tr></thead>
+        <tbody id="positions"></tbody></table></div>
+      </div>
+      <div class="card">
+        <h2><span class="tabs"><span class="tab on" data-tab="tape">Trades</span><span class="tab" data-tab="log">Activity</span></span></h2>
+        <div id="tape" class="scroll"></div>
+        <div id="log" class="log" hidden></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<dialog id="settings">
+  <div class="card" style="border:0">
+    <h2>Settings <button class="btn ghost right" id="closeSettings">Close</button></h2>
+    <div class="body" id="keysBody"></div>
+    <div class="body" style="border-top:1px solid var(--line)">
+      <div class="muted" style="font-size:12px">Keys are saved to <span class="mono">~/.hedge-fund/.env</span>. Get free Alpaca paper keys at alpaca.markets → Paper Trading → API Keys.</div>
+      <div class="row"><button class="btn danger" id="resetPaper">Reset local paper book</button></div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="killDlg">
+  <div class="card" style="border:0">
+    <h2>Kill switch</h2>
+    <div class="body">
+      <div>Stops autopilot, drops every pending proposal, and cancels open broker orders.</div>
+      <label class="toggle"><input type="checkbox" id="killFlatten"> Also close every position now</label>
+      <div class="row"><button class="btn kill" id="killGo">Stop everything</button><button class="btn" id="killCancel">Cancel</button></div>
+    </div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money = (v, d = 2) => v == null || isNaN(v) ? "—" : (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
+const pct = (v) => v == null || isNaN(v) ? "—" : (v >= 0 ? "+" : "") + (v * 100).toFixed(2) + "%";
+const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+                set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+
+let S = null;           // last /api/state
+let selectedJob = null; // job id shown in the center
+let jobDetail = null;
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : { method: "POST", headers: {"Content-Type": "application/json", "X-AIHF": "1"}, body: JSON.stringify(body) };
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+function toast(msg, err = false) {
+  const t = $("toast"); t.textContent = msg; t.className = "toast" + (err ? " err" : ""); t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 4500);
+}
+const fund = () => $("fund").value;
+const broker = () => $("broker").value;
+const tickers = () => $("tickers").value;
+
+async function refresh() {
+  try {
+    S = await api(`/api/state?fund=${encodeURIComponent(fund() || store.get("fund", ""))}&broker=${encodeURIComponent(broker() || store.get("broker", "paper"))}`);
+  } catch (e) { toast("Desk unreachable: " + e.message, true); return; }
+  renderHeader(); renderAccount(); renderAutopilot(); renderJobs(); renderLog();
+  if (selectedJob) await loadJob(selectedJob, true);
+}
+
+function renderHeader() {
+  const f = $("fund"), cur = f.value || store.get("fund", "");
+  if (f.options.length !== S.funds.length) {
+    f.innerHTML = S.funds.map((x) => `<option value="${esc(x.name)}">${esc(x.name)}</option>`).join("");
+    if (S.funds.some((x) => x.name === cur)) f.value = cur;
+    loadTickers();
+  }
+  const b = $("broker"), bcur = b.value || store.get("broker", "paper");
+  b.innerHTML = Object.entries(S.brokers).map(([k, v]) =>
+    `<option value="${k}" ${v.ready ? "" : "disabled"}>${esc(v.label)}${v.ready ? "" : " (setup needed)"}</option>`).join("");
+  b.value = S.brokers[bcur]?.ready ? bcur : "paper";
+  $("liveBanner").hidden = b.value !== "alpaca-live";
+
+  const m = $("model");
+  if (!m.options.length) m.innerHTML = S.models.map((x) => `<option value="${esc(x.id)}">${esc(x.label)} · ${esc(x.provider)}</option>`).join("");
+  if (document.activeElement !== m) m.value = S.model;
+
+  const spec = S.funds.find((x) => x.name === f.value);
+  $("staff").innerHTML = spec ? spec.strategies.map((s) => `<b>${esc(s.name)}</b>: ${s.models.map(esc).join(", ")}`).join(" · ") + ` · rebalances ${esc(spec.rebalance)}` : "No mandates found in ~/.hedge-fund/mandates.";
+}
+
+function renderAccount() {
+  const a = S.account;
+  const open = a?.market_open;
+  $("market").innerHTML = `<span class="dot ${a ? (open ? "on" : "off") : ""}"></span><span>${a ? (open ? "market open" : "market closed") : "market"}</span>`;
+  if (!a) {
+    ["kEquity", "kPnl", "kCash", "kPos"].forEach((id) => $(id).textContent = "—");
+    $("positions").innerHTML = `<tr><td colspan="5" class="empty">${esc(S.account_error || "No account loaded")}</td></tr>`;
+    $("tape").innerHTML = "";
+    return;
+  }
+  const pnl = a.equity - a.start;
+  $("kEquity").textContent = money(a.equity);
+  $("kEquitySub").textContent = S.brokers[a.broker].label;
+  $("kPnl").textContent = money(pnl); $("kPnl").className = "value mono " + (pnl >= 0 ? "pos" : "neg");
+  $("kPnlSub").textContent = pct(pnl / a.start) + " on " + money(a.start, 0);
+  $("kCash").textContent = money(a.cash);
+  $("kBp").textContent = "buying power " + money(a.buying_power, 0);
+  $("kPos").textContent = a.positions.length;
+  const gross = a.positions.reduce((s, p) => s + Math.abs(p.value || 0), 0);
+  $("kGross").textContent = "gross " + (a.equity ? (gross / a.equity * 100).toFixed(0) : 0) + "% of equity";
+
+  $("positions").innerHTML = a.positions.length ? a.positions.map((p) => `<tr>
+    <td><b>${esc(p.ticker)}</b></td><td class="num ${p.shares < 0 ? "neg" : ""}">${p.shares}</td>
+    <td class="num">${money(p.price)}</td><td class="num">${money(p.value, 0)}</td>
+    <td class="num ${p.pnl == null ? "muted" : p.pnl >= 0 ? "pos" : "neg"}">${p.pnl == null ? "—" : money(p.pnl, 0)}</td></tr>`).join("")
+    : `<tr><td colspan="5" class="empty">Flat — no positions</td></tr>`;
+
+  $("tape").innerHTML = a.tape.length ? `<table class="mono"><tbody>${a.tape.map((t) => `<tr>
+    <td class="muted">${esc((t.time || "").replace("T", " ").slice(5, 16))}</td>
+    <td><span class="side ${t.side}">${t.side.toUpperCase()}</span></td><td><b>${esc(t.ticker)}</b></td>
+    <td class="num">${t.quantity}</td><td class="num">${t.price == null ? "—" : money(t.price)}</td>
+    <td class="muted">${t.status === "filled" ? "" : esc(t.status)}</td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty">No trades yet</div>`;
+}
+
+function renderAutopilot() {
+  const ap = S.autopilot || {};
+  const on = !!ap.enabled;
+  $("apPill").innerHTML = `<span class="dot ${on ? "on" : ""}"></span>${on ? "running" : "off"}`;
+  $("kAuto").textContent = on ? "On" : "Off"; $("kAuto").className = "value " + (on ? "pos" : "muted");
+  $("apStart").disabled = on; $("apStop").disabled = !on;
+  if (on) {
+    const next = Math.max(0, Math.round((ap.next_run * 1000 - Date.now()) / 60000));
+    $("kAutoSub").textContent = `${ap.fund} · ${S.brokers[ap.broker]?.label || ap.broker}`;
+    $("apStatus").innerHTML = `Trading <b>${esc(ap.universe.join(", "))}</b> every ${ap.interval_minutes} min · next check in ~${next} min` +
+      (ap.auto_execute ? "" : " · proposals wait for your approval") + (ap.last_skip ? `<br><span class="amber">Skipped: ${esc(ap.last_skip)}</span>` : "");
+  } else { $("kAutoSub").textContent = "manual mode"; $("apStatus").textContent = ""; }
+}
+
+const STATUS = { running: ["Agents thinking", "warn"], awaiting_approval: ["Needs approval", "warn"], executing: ["Sending orders", "warn"],
+  done: ["Done", "on"], partial: ["Partly filled", "off"], failed: ["Failed", "off"], rejected: ["Rejected", ""], stale: ["Stale", ""] };
+
+function renderJobs() {
+  if (!selectedJob && S.jobs.length) selectedJob = S.jobs[0].id;
+  $("jobs").innerHTML = S.jobs.map((j) => {
+    const [label, cls] = STATUS[j.status] || [j.status, ""];
+    return `<span class="pill jobchip ${j.id === selectedJob ? "sel" : ""}" data-job="${j.id}"><span class="dot ${cls}"></span>${esc(j.started.slice(11, 16))} ${esc(label)}${j.source === "autopilot" ? " · auto" : ""}</span>`;
+  }).join("");
+  $("jobs").hidden = !S.jobs.length;
+}
+
+async function loadJob(id, quiet) {
+  try { jobDetail = await api(`/api/job?id=${id}`); } catch (e) { if (!quiet) toast(e.message, true); return; }
+  renderCycle();
+}
+
+function convictionBar(v) {
+  const w = Math.min(1, Math.abs(v)) * 45;
+  return `<span class="bar"><i style="${v >= 0 ? `left:50%;width:${w}px;background:var(--green)` : `right:50%;width:${w}px;background:var(--red)`}"></i></span>`;
+}
+
+function renderCycle() {
+  const j = jobDetail; if (!j) return;
+  const [label] = STATUS[j.status] || [j.status];
+  $("cycleMeta").textContent = `${j.fund} · ${S.brokers[j.broker]?.label || j.broker} · ${j.universe.join(", ")}`;
+  let h = "";
+  if (j.status === "running") h += `<div class="banner"><span class="spin"></span> The agents are researching ${esc(j.universe.join(", "))}… this can take a minute or two.</div>`;
+  if (j.status === "failed" || j.status === "stale") h += `<div class="banner live">${esc(j.error || label)}</div>`;
+  const r = j.record;
+  if (r) {
+    if (j.status === "awaiting_approval") h += `<div class="banner approve row"><div><b>${r.orders.length} orders proposed.</b> Nothing has been sent yet.</div>
+      <button class="btn go" id="approveBtn">Approve &amp; execute</button><button class="btn" id="rejectBtn">Reject</button></div>`;
+    const results = {}; (j.results || []).forEach((x) => results[x.order.ticker] = x);
+    h += `<table class="mono"><thead><tr><th>Order</th><th>Ticker</th><th class="num">Shares</th><th class="num">Ref price</th><th class="num">Notional</th><th class="num">Target wt</th><th>Result</th></tr></thead><tbody>` +
+      (r.orders.length ? r.orders.map((o) => {
+        const res = results[o.ticker];
+        const out = !res ? `<span class="muted">${j.status === "awaiting_approval" ? "pending" : j.status === "executing" ? "sending…" : "—"}</span>`
+          : res.error ? `<span class="neg" title="${esc(res.error)}">failed</span>` : `<span class="pos">filled @ ${money(res.fill.price)}</span>`;
+        return `<tr><td><span class="side ${o.side}">${o.side.toUpperCase()}</span></td><td><b>${esc(o.ticker)}</b></td><td class="num">${o.quantity}</td>
+          <td class="num">${money(o.price)}</td><td class="num">${money(o.quantity * o.price, 0)}</td><td class="num">${pct(r.final_weights[o.ticker] || 0)}</td><td>${out}</td></tr>`;
+      }).join("") : `<tr><td colspan="7" class="empty">The book already matches the agents' targets — no trades.</td></tr>`) + `</tbody></table>`;
+    const errs = (j.results || []).filter((x) => x.error);
+    if (errs.length) h += `<div class="banner live">${errs.map((x) => `${esc(x.order.side)} ${x.order.quantity} ${esc(x.order.ticker)}: ${esc(x.error)}`).join("<br>")}</div>`;
+    if (r.clamps.length) h += `<div class="muted" style="font-size:12px">Risk clamped: ${r.clamps.map((c) => `${esc(c.ticker || "gross")} ${pct(c.before)} → ${pct(c.after)}`).join(", ")}</div>`;
+    if (r.skipped.length) h += `<div class="muted" style="font-size:12px">Skipped: ${r.skipped.map((s) => `${esc(s.ticker)} (${esc(s.reason)})`).join(", ")}</div>`;
+    h += `<div class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin-top:6px">Why — every agent's call</div>`;
+    for (const sr of r.strategies) {
+      for (const sig of sr.signals) {
+        const abst = sig.metadata?.abstained === true;
+        h += `<details class="signal"><summary>${convictionBar(sig.value)}<span class="mono ${sig.value > 0.05 ? "pos" : sig.value < -0.05 ? "neg" : "muted"}" style="width:48px">${sig.value >= 0 ? "+" : ""}${sig.value.toFixed(2)}</span>
+          <b>${esc(sig.ticker)}</b><span class="muted">${esc(sig.model_name)} · ${esc(sr.name)}${abst ? " · abstained" : ""}</span></summary>
+          <div class="thesis">${esc(sig.reasoning || "No written thesis (quant model).")}</div></details>`;
+      }
+    }
+  }
+  $("cycle").innerHTML = h || `<div class="empty">${esc(label)}</div>`;
+  $("approveBtn")?.addEventListener("click", () => act(() => api("/api/approve", { id: j.id }), "Approved — sending orders"));
+  $("rejectBtn")?.addEventListener("click", () => act(() => api("/api/reject", { id: j.id }), "Rejected"));
+}
+
+function renderLog() {
+  $("log").innerHTML = S.log.length ? S.log.map((l) => `<div class="${l.level}"><span class="t mono">${esc(l.time.slice(11))}</span><span>${esc(l.message)}</span></div>`).join("") : `<div class="empty">Quiet so far</div>`;
+}
+
+async function act(fn, ok) {
+  try { const out = await fn(); if (ok) toast(ok); await refresh(); return out; } catch (e) { toast(e.message, true); }
+}
+
+function loadTickers() { $("tickers").value = store.get("tickers:" + fund(), "AAPL, MSFT, NVDA"); }
+
+async function startCycle(auto) {
+  if (!tickers().trim()) return toast("Add at least one ticker", true);
+  if (auto && broker() === "alpaca-live" && !confirm("Execute agent trades with REAL money?")) return;
+  store.set("tickers:" + fund(), tickers());
+  const out = await act(() => api("/api/cycle", { fund: fund(), broker: broker(), tickers: tickers(), auto_execute: auto }),
+    auto ? "Agents running — trades will execute when they finish" : "Agents running — you'll approve the orders");
+  if (out) { selectedJob = out.job; await loadJob(out.job); renderJobs(); }
+}
+
+$("previewBtn").onclick = () => startCycle(false);
+$("runTradeBtn").onclick = () => startCycle(true);
+$("fund").onchange = () => { store.set("fund", fund()); loadTickers(); refresh(); };
+$("broker").onchange = () => { store.set("broker", broker()); refresh(); };
+$("model").onchange = (e) => act(() => api("/api/model", { model: e.target.value }), "Agents will use " + e.target.selectedOptions[0].text);
+$("jobs").onclick = (e) => { const c = e.target.closest("[data-job]"); if (c) { selectedJob = c.dataset.job; renderJobs(); loadJob(selectedJob); } };
+
+$("apStart").onclick = () => {
+  if (!tickers().trim()) return toast("Add at least one ticker", true);
+  if (broker() === "alpaca-live" && $("apAuto").checked && !confirm("Let autopilot trade REAL money unattended?")) return;
+  store.set("tickers:" + fund(), tickers());
+  act(() => api("/api/autopilot", { action: "start", fund: fund(), broker: broker(), tickers: tickers(),
+    interval_minutes: $("apInterval").value, auto_execute: $("apAuto").checked, market_hours_only: $("apHours").checked }), "Autopilot started");
+};
+$("apStop").onclick = () => act(() => api("/api/autopilot", { action: "stop" }), "Autopilot stopped");
+
+document.querySelectorAll("[data-side]").forEach((b) => b.onclick = () => {
+  const t = $("oTicker").value.trim(), q = parseInt($("oQty").value, 10);
+  if (!t || !(q > 0)) return toast("Ticker and share count required", true);
+  if (broker() === "alpaca-live" && !confirm(`${b.dataset.side.toUpperCase()} ${q} ${t} with REAL money?`)) return;
+  act(async () => { const r = await api("/api/order", { fund: fund(), broker: broker(), ticker: t, side: b.dataset.side, quantity: q });
+    if (r.error) throw new Error(r.error); return r; }, `${b.dataset.side} ${q} ${t.toUpperCase()} sent`);
+});
+
+document.querySelectorAll(".tab").forEach((t) => t.onclick = () => {
+  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x === t));
+  $("tape").hidden = t.dataset.tab !== "tape"; $("log").hidden = t.dataset.tab !== "log";
+});
+
+$("killBtn").onclick = () => $("killDlg").showModal();
+$("killCancel").onclick = () => $("killDlg").close();
+$("killGo").onclick = async () => { $("killDlg").close();
+  await act(() => api("/api/kill", { fund: fund(), broker: broker(), flatten: $("killFlatten").checked }), "Kill switch engaged"); };
+
+$("settingsBtn").onclick = () => {
+  $("keysBody").innerHTML = Object.entries(S.keys).map(([k, v]) => `<label class="field">${esc(k)}
+    <div class="row"><input type="password" data-key="${esc(k)}" placeholder="${v ? esc(v) : "not set"}" autocomplete="off"><button class="btn" data-save="${esc(k)}">Save</button></div></label>`).join("");
+  $("keysBody").querySelectorAll("[data-save]").forEach((b) => b.onclick = () => {
+    const input = $("keysBody").querySelector(`[data-key="${b.dataset.save}"]`);
+    act(() => api("/api/keys", { name: b.dataset.save, value: input.value }), b.dataset.save + " saved").then(() => { input.value = ""; $("settings").close(); });
+  });
+  $("settings").showModal();
+};
+$("closeSettings").onclick = () => $("settings").close();
+$("resetPaper").onclick = () => { if (confirm(`Reset the local paper book for ${fund()} to its starting capital?`))
+  act(() => api("/api/reset-paper", { fund: fund() }), "Paper book reset"); };
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
