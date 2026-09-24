@@ -1,0 +1,10 @@
+# Macro odds — prediction-market crowds as a regime tilt. Live Polymarket /
+# Kalshi odds (pmxt) on recession and rate cuts, longshot-bias corrected
+# (prediction-market-analysis calibration), one risk-on/off view for the book.
+name: macro-odds
+display_name: Macro Odds
+models:
+  - name: prediction_markets
+blend:
+  method: conviction_weighted
+  gross_target: 0.5

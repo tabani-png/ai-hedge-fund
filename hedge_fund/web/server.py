@@ -32,7 +32,8 @@ STATIC = Path(__file__).resolve().parent / "static"
 
 # Keys the dashboard may write — nothing else reaches .env through it.
 SETTABLE_KEYS = ["FINANCIAL_DATASETS_API_KEY", "ALPACA_API_KEY", "ALPACA_SECRET_KEY",
-                 *sorted(set(PROVIDER_ENV_VARS.values()))]
+                 *sorted(set(PROVIDER_ENV_VARS.values())),
+                 "PMXT_API_KEY", "PMXT_WALLET_ADDRESS", "TRADINGAGENTS_PYTHON"]
 
 
 def broker_status() -> dict[str, dict]:
@@ -63,6 +64,8 @@ def state(desk: Desk, fund: str | None, broker: str | None) -> dict:
         "log": list(desk.log)[:100],
         "account": None,
         "account_error": None,
+        "leaderboard": desk.leaderboard(),
+        "guardrails": desk.guardrails(fund).view() if fund in specs else None,
     }
     if fund in specs and broker in BROKER_KINDS and out["brokers"][broker]["ready"]:
         try:
@@ -114,6 +117,16 @@ def handle_post(desk: Desk, path: str, body: dict) -> dict:
         os.environ["HEDGE_FUND_LLM_MODEL"] = body["model"]
         desk._funds.clear()  # rebuild agents with the new model on the next cycle
         return {"ok": True}
+    if path == "/api/guardrails":
+        if body.get("action") == "reset":
+            desk.guardrails(body["fund"]).reset()
+            desk._note("info", f"{body['fund']}: guardrails reset — trading allowed again")
+        for key in ("reentry_cooldown_minutes", "max_orders_per_day", "max_drawdown_pct",
+                    "flatten_on_drawdown", "safe_mode_after_failures"):
+            if key in body.get("limits", {}):
+                current = getattr(desk.limits, key)
+                setattr(desk.limits, key, type(current)(body["limits"][key]))
+        return desk.guardrails(body["fund"]).view()
     if path == "/api/reset-paper":
         desk.reset_paper(body["fund"])
         return {"ok": True}

@@ -26,7 +26,6 @@ import time
 import traceback
 import uuid
 from collections import deque
-from datetime import date as _date
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -34,12 +33,14 @@ from zoneinfo import ZoneInfo
 
 from hedge_fund.brokers import AlpacaBroker, Broker, Fill, Order, PaperBroker, SimBroker
 from hedge_fund.data import CachedDataClient, FDClient
+from hedge_fund.desk.guardrails import GuardrailLimits, Guardrails
 from hedge_fund.fund import Fund, FundSpec, load_spec, normalize_universe
 from hedge_fund.paths import USER_DIR, ensure_mandates_dir
 from hedge_fund.pipeline import CycleRecord, run_cycle
 from hedge_fund.pipeline.run_cycle import _mark_prices
 
 PAPER_DIR = USER_DIR / "paper"
+GUARD_DIR = USER_DIR / "guardrails"
 BROKER_KINDS = ("paper", "alpaca", "alpaca-live")
 _NY = ZoneInfo("America/New_York")
 _CADENCE_MINUTES = {"daily": 24 * 60, "weekly": 7 * 24 * 60, "monthly": 30 * 24 * 60}
@@ -64,6 +65,8 @@ class Desk:
         *,
         mandates_dir: Path | None = None,
         paper_dir: Path = PAPER_DIR,
+        guard_dir: Path = GUARD_DIR,
+        clock: Callable[[], datetime] | None = None,
         data_client_factory: Callable[[], object] | None = None,
         fund_factory: Callable[[FundSpec], Fund] = Fund,
         broker_factory: Callable[[str, FundSpec], Broker] | None = None,
@@ -80,7 +83,36 @@ class Desk:
         self.autopilot: dict = {"enabled": False}
         self._autopilot_stop = threading.Event()
         self._autopilot_thread: threading.Thread | None = None
-        self._marks_cache: dict[str, tuple[float, float]] = {}
+        self._marks_cache: dict[tuple[str, str], tuple[float, float]] = {}
+        self.guard_dir = guard_dir
+        # Wall clock by default; the simulator drives a fake one so a year of
+        # weekly cycles runs in seconds with cooldowns and dates still honest.
+        self.clock = clock or (lambda: datetime.now(_NY))
+        self.limits = GuardrailLimits()
+
+    def today(self) -> str:
+        return self.clock().date().isoformat()
+
+    def guardrails(self, fund_name: str) -> Guardrails:
+        return Guardrails(self.guard_dir / f"{fund_name}.json", self.limits)
+
+    def leaderboard(self) -> list[dict]:
+        """Every fund's local paper book ranked by return — NoFx's competition
+        board, for mandates: run several side by side, see which desk wins."""
+        rows = []
+        for name, spec in self.fund_specs().items():
+            if not (self.paper_dir / f"{name}.json").exists():
+                continue
+            try:
+                acct = self.account("paper", name)
+            except Exception:
+                continue
+            rows.append({
+                "fund": name, "equity": acct["equity"], "start": spec.capital,
+                "return": acct["equity"] / spec.capital - 1, "positions": len(acct["positions"]),
+                "trades": len(acct["tape"]), "halted": self.guardrails(name).state.tripped,
+            })
+        return sorted(rows, key=lambda r: r["return"], reverse=True)
 
     # ------------------------------------------------------------------
     # Funds and brokers
@@ -179,7 +211,7 @@ class Desk:
         out: dict[str, float] = {}
         missing = []
         for t in tickers:
-            hit = self._marks_cache.get(t)
+            hit = self._marks_cache.get((t, self.today()))
             if hit and now - hit[1] < 300:
                 out[t] = hit[0]
             else:
@@ -187,9 +219,9 @@ class Desk:
         if missing:
             try:
                 client = self._data_client_factory()
-                marks, _ = _mark_prices(missing, _date.today().isoformat(), {}, client)
+                marks, _ = _mark_prices(missing, self.today(), {}, client)
                 for t, px in marks.items():
-                    self._marks_cache[t] = (px, now)
+                    self._marks_cache[(t, self.today())] = (px, now)
                     out[t] = px
             except Exception as exc:
                 self._note("warn", f"could not price {', '.join(missing)}: {exc}")
@@ -208,7 +240,7 @@ class Desk:
         job = {
             "id": job_id, "fund": fund_name, "broker": kind, "universe": universe,
             "source": source, "auto_execute": auto_execute, "status": "running",
-            "started": datetime.now().isoformat(timespec="seconds"),
+            "started": self.clock().isoformat(timespec="seconds"),
             "record": None, "results": [], "error": None,
         }
         with self._lock:
@@ -225,6 +257,7 @@ class Desk:
             record = self.preview(spec, broker, job["universe"])
             job["record"] = record
             job["book"] = {t: p.shares for t, p in broker.positions().items()}
+            self.guardrails(job["fund"]).cycle_result(ok=True)
             n = len(record.orders)
             if n == 0:
                 job["status"] = "done"
@@ -240,13 +273,17 @@ class Desk:
             job["error"] = str(exc)
             job["trace"] = traceback.format_exc()
             self._note("error", f"{job['fund']} cycle failed: {exc}")
+            tripped = self.guardrails(job["fund"]).cycle_result(ok=False)
+            if tripped:
+                self.stop_autopilot(quiet=True)
+                self._note("error", f"{job['fund']}: {tripped} — autopilot stopped")
 
     def preview(self, spec: FundSpec, broker: Broker, universe: list[str]) -> CycleRecord:
         """run_cycle against a copy of *broker*'s book: real decisions, no orders sent."""
         dry = SimBroker.from_book(broker.cash(), broker.positions())
         client = self._data_client_factory()
         try:
-            return run_cycle(self._fund(spec), _date.today().isoformat(), dry, client, universe)
+            return run_cycle(self._fund(spec), self.today(), dry, client, universe)
         finally:
             close = getattr(client, "close", None) or getattr(getattr(client, "_client", None), "close", None)
             if callable(close):
@@ -284,7 +321,12 @@ class Desk:
             job["error"] = "market is closed — Alpaca market orders would sit until the open"
             self._note("warn", f"{job['fund']}: {job['error']}")
             return
-        results, fills = self.execute(record.orders, broker)
+        guard = self.guardrails(job["fund"])
+        allowed, blocked = guard.screen(record.orders, self.clock())
+        results, fills = self.execute(allowed, broker, guard=guard)
+        for order, why in blocked:
+            results.append({"order": order.model_dump(), "fill": None, "error": None, "blocked": why})
+            self._note("warn", f"guardrail held {order.side} {order.quantity} {order.ticker}: {why}")
         job["results"] = results
         positions = {t: p.shares for t, p in broker.positions().items()}
         cash = broker.cash()
@@ -297,10 +339,12 @@ class Desk:
         job["status"] = "partial" if errors else "done"
         self._note("error" if errors else "trade",
                    f"{job['fund']}: {len(fills)}/{len(record.orders)} orders filled"
-                   + (f", {len(errors)} failed" if errors else ""))
+                   + (f", {len(errors)} failed" if errors else "")
+                   + (f", {len(blocked)} held by guardrails" if blocked else ""))
         self._save_receipt(job["record"])
 
-    def execute(self, orders: list[Order], broker: Broker) -> tuple[list[dict], list[Fill]]:
+    def execute(self, orders: list[Order], broker: Broker,
+                guard: Guardrails | None = None) -> tuple[list[dict], list[Fill]]:
         """Send *orders* in order (sells first, as build_orders sorts them).
         One failure never stops the rest: each result says what happened."""
         results: list[dict] = []
@@ -309,6 +353,8 @@ class Desk:
             try:
                 fill = broker.place_order(order)
                 fills.append(fill)
+                if guard is not None:
+                    guard.record_fill(fill.ticker, self.clock())
                 results.append({"order": order.model_dump(), "fill": fill.model_dump(), "error": None})
                 self._note("trade", f"{fill.side.upper()} {fill.quantity} {fill.ticker} @ ${fill.price:,.2f}")
             except Exception as exc:
@@ -366,9 +412,18 @@ class Desk:
         if was_on and not quiet:
             self._note("info", "autopilot OFF")
 
+    RISK_CHECK_SECONDS = 300  # drawdown watch between cycles, as NoFx monitors continuously
+
     def _autopilot_loop(self, stop: threading.Event) -> None:
+        next_risk_check = time.time() + self.RISK_CHECK_SECONDS
         while not stop.is_set():
             ap = self.autopilot
+            if time.time() >= next_risk_check:
+                next_risk_check = time.time() + self.RISK_CHECK_SECONDS
+                try:
+                    self._risk_check(ap)
+                except Exception as exc:
+                    self._note("warn", f"risk check failed: {exc}")
             if time.time() >= ap["next_run"]:
                 ap["next_run"] = time.time() + ap["interval_minutes"] * 60
                 try:
@@ -383,6 +438,8 @@ class Desk:
             ap["last_skip"] = "previous cycle still open"
             return
         spec = self.spec(ap["fund"])
+        if self._risk_check(ap):
+            return
         if ap["market_hours_only"] and not self.market_open(self.broker(ap["broker"], spec)):
             ap["last_skip"] = f"market closed at {datetime.now(_NY):%a %H:%M} ET"
             ap["next_run"] = time.time() + min(ap["interval_minutes"], 15) * 60
@@ -390,6 +447,26 @@ class Desk:
         ap["last_skip"] = None
         ap["last_job"] = self.start_cycle(ap["fund"], ap["universe"], ap["broker"],
                                           auto_execute=ap["auto_execute"], source="autopilot")
+
+    def _risk_check(self, ap: dict) -> bool:
+        """Mark the book against its peak; trip the breaker (kill, maybe
+        flatten) on a deep drawdown. True means trading is halted."""
+        guard = self.guardrails(ap["fund"])
+        if guard.state.tripped:
+            ap["last_skip"] = f"halted — {guard.state.tripped} (reset it in Guardrails)"
+            return True
+        try:
+            equity = self.account(ap["broker"], ap["fund"])["equity"]
+        except Exception as exc:
+            self._note("warn", f"could not read equity for the drawdown check: {exc}")
+            return False
+        tripped = guard.check_equity(equity)
+        if tripped:
+            ap["last_skip"] = tripped
+            self.kill(ap["fund"], ap["broker"], flatten=self.limits.flatten_on_drawdown)
+            self._note("error", f"{ap['fund']}: {tripped}")
+            return True
+        return False
 
     def kill(self, fund_name: str | None, kind: str | None, *, flatten: bool) -> None:
         """Stop everything: autopilot off, pending proposals rejected, and on
@@ -450,7 +527,7 @@ class Desk:
         """Same filename shape the TUI writes, so its fund history shows these runs."""
         try:
             self.mandates_dir.mkdir(parents=True, exist_ok=True)
-            stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+            stamp = self.clock().strftime("%Y-%m-%d-%H%M%S")
             (self.mandates_dir / f"{record.fund}-run-{stamp}.json").write_text(record.model_dump_json(indent=2))
         except OSError as exc:
             self._note("warn", f"could not save receipt: {exc}")

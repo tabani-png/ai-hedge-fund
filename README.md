@@ -97,6 +97,47 @@ Brokers:
 | Alpaca paper | Real market fills with fake money | `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` (free at alpaca.markets) |
 | Alpaca live | **Real money** | the same keys, plus `ALPACA_LIVE=1` when you launch |
 
+### The combined fund: every repo in one book
+
+`~/.hedge-fund/mandates/multi-repo.yaml` (created on first run) runs four pods together:
+
+| Pod | Comes from | What it adds |
+|-----|-----------|--------------|
+| deep-value | this repo | Graham, Buffett, and Munger persona agents |
+| multi-agent-desk | [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) | a whole firm per ticker: analysts, a bull/bear debate, a trader, a risk team, and a 5-tier rating (Buy +1 … Sell -1) |
+| earnings-drift | this repo | the PEAD quant model |
+| macro-odds | [pmxt](https://github.com/pmxt-dev/pmxt) + [prediction-market-analysis](https://github.com/Jon-Becker/prediction-market-analysis) | live Polymarket/Kalshi odds on recession and rate cuts, corrected for longshot bias, applied as a risk-on/risk-off tilt |
+
+The desk enforces [NoFx](https://github.com/NoFxAiOS/nofx)-style guardrails on top of the mandate's risk limits: re-entry cooldowns, a daily order cap, a drawdown circuit breaker (checked every 5 minutes, and it can flatten the book), and a safe mode after repeated failed cycles. The dashboard shows a leaderboard that ranks funds by return.
+
+Setup for the external pieces (each one is optional; if it's missing, that analyst abstains and the fund keeps running):
+
+```bash
+# TradingAgents lives in its own venv (its langchain pins conflict with this package's)
+python -m venv ~/.hedge-fund/ta-venv
+~/.hedge-fund/ta-venv/bin/pip install git+https://github.com/TauricResearch/TradingAgents
+export TRADINGAGENTS_PYTHON=~/.hedge-fund/ta-venv/bin/python   # it uses the fund's LLM by default
+
+# prediction-market odds
+pip install pmxt
+export PMXT_API_KEY=...            # pmxt.dev/dashboard
+export PMXT_WALLET_ADDRESS=0x...
+
+# optional: fit the longshot-bias correction from prediction-market-analysis's dataset
+pip install duckdb
+aihf calibrate ~/prediction-market-analysis/data/kalshi
+```
+
+### Simulate before you trade
+
+```bash
+aihf simulate               # 52 weeks, 3 funds, a market crash in week 40
+aihf simulate --serve       # then open the trading desk on the simulated books
+aihf simulate --max-drawdown 0.05   # watch the breaker trip and flatten
+```
+
+The simulator runs the real stack week by week: every analyst, the desk's autopilot, guardrails, paper books, receipts, and the leaderboard. It checks invariants on every cycle (NAV reconciles, risk caps hold, the receipts match the broker). Only the outside world is synthetic: market data, LLM replies, TradingAgents' verdict, and the odds. No API keys needed. It tests the machinery, not whether the fund makes money.
+
 The CLI can use the same brokers: `aihf mandate.yaml --tickers AAPL,MSFT --broker paper` (or `--broker alpaca`).
 
 ## Development

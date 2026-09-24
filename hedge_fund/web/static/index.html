@@ -178,6 +178,23 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
           </div>
         </div>
       </div>
+
+      <div class="card">
+        <h2>Guardrails <span class="right pill" id="grPill"><span class="dot on"></span>armed</span></h2>
+        <div class="body">
+          <div class="row">
+            <label class="field">Max drawdown %<input type="number" id="grDd" min="1" max="90" step="1"></label>
+            <label class="field">Orders / day<input type="number" id="grCap" min="1" step="1"></label>
+          </div>
+          <div class="row">
+            <label class="field">Re-entry cooldown (min)<input type="number" id="grCool" min="0" step="15"></label>
+            <label class="field">Safe mode after fails<input type="number" id="grFails" min="1" step="1"></label>
+          </div>
+          <label class="toggle"><input type="checkbox" id="grFlat"> Flatten the book when the drawdown breaker trips</label>
+          <div class="row"><button class="btn" id="grSave">Save limits</button><button class="btn danger" id="grReset">Reset halt</button></div>
+          <div class="muted" id="grStatus" style="font-size:12px"></div>
+        </div>
+      </div>
     </div>
 
     <!-- CENTER: cycles -->
@@ -193,6 +210,10 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
         <h2>Positions</h2>
         <div class="scroll"><table class="mono"><thead><tr><th>Ticker</th><th class="num">Shares</th><th class="num">Price</th><th class="num">Value</th><th class="num">P&amp;L</th></tr></thead>
         <tbody id="positions"></tbody></table></div>
+      </div>
+      <div class="card">
+        <h2>Leaderboard <span class="right muted" style="font-size:12px">local paper books</span></h2>
+        <div id="board" class="scroll"></div>
       </div>
       <div class="card">
         <h2><span class="tabs"><span class="tab on" data-tab="tape">Trades</span><span class="tab" data-tab="log">Activity</span></span></h2>
@@ -258,7 +279,7 @@ async function refresh() {
   try {
     S = await api(`/api/state?fund=${encodeURIComponent(fund() || store.get("fund", ""))}&broker=${encodeURIComponent(broker() || store.get("broker", "paper"))}`);
   } catch (e) { toast("Desk unreachable: " + e.message, true); return; }
-  renderHeader(); renderAccount(); renderAutopilot(); renderJobs(); renderLog();
+  renderHeader(); renderAccount(); renderAutopilot(); renderJobs(); renderLog(); renderGuardrails(); renderBoard();
   if (selectedJob) await loadJob(selectedJob, true);
 }
 
@@ -370,10 +391,13 @@ function renderCycle() {
       (r.orders.length ? r.orders.map((o) => {
         const res = results[o.ticker];
         const out = !res ? `<span class="muted">${j.status === "awaiting_approval" ? "pending" : j.status === "executing" ? "sending…" : "—"}</span>`
+          : res.blocked ? `<span class="amber" title="${esc(res.blocked)}">held by guardrail</span>`
           : res.error ? `<span class="neg" title="${esc(res.error)}">failed</span>` : `<span class="pos">filled @ ${money(res.fill.price)}</span>`;
         return `<tr><td><span class="side ${o.side}">${o.side.toUpperCase()}</span></td><td><b>${esc(o.ticker)}</b></td><td class="num">${o.quantity}</td>
           <td class="num">${money(o.price)}</td><td class="num">${money(o.quantity * o.price, 0)}</td><td class="num">${pct(r.final_weights[o.ticker] || 0)}</td><td>${out}</td></tr>`;
       }).join("") : `<tr><td colspan="7" class="empty">The book already matches the agents' targets — no trades.</td></tr>`) + `</tbody></table>`;
+    const held = (j.results || []).filter((x) => x.blocked);
+    if (held.length) h += `<div class="banner">${held.map((x) => `Guardrail held ${esc(x.order.side)} ${x.order.quantity} ${esc(x.order.ticker)}: ${esc(x.blocked)}`).join("<br>")}</div>`;
     const errs = (j.results || []).filter((x) => x.error);
     if (errs.length) h += `<div class="banner live">${errs.map((x) => `${esc(x.order.side)} ${x.order.quantity} ${esc(x.order.ticker)}: ${esc(x.error)}`).join("<br>")}</div>`;
     if (r.clamps.length) h += `<div class="muted" style="font-size:12px">Risk clamped: ${r.clamps.map((c) => `${esc(c.ticker || "gross")} ${pct(c.before)} → ${pct(c.after)}`).join(", ")}</div>`;
@@ -391,6 +415,28 @@ function renderCycle() {
   $("cycle").innerHTML = h || `<div class="empty">${esc(label)}</div>`;
   $("approveBtn")?.addEventListener("click", () => act(() => api("/api/approve", { id: j.id }), "Approved — sending orders"));
   $("rejectBtn")?.addEventListener("click", () => act(() => api("/api/reject", { id: j.id }), "Rejected"));
+}
+
+function renderGuardrails() {
+  const g = S.guardrails; if (!g) return;
+  const halted = g.state.tripped;
+  $("grPill").innerHTML = `<span class="dot ${halted ? "off" : "on"}"></span>${halted ? "HALTED" : "armed"}`;
+  const set = (id, v) => { if (document.activeElement !== $(id)) $(id).value = v; };
+  set("grDd", Math.round(g.limits.max_drawdown_pct * 100)); set("grCap", g.limits.max_orders_per_day);
+  set("grCool", g.limits.reentry_cooldown_minutes); set("grFails", g.limits.safe_mode_after_failures);
+  if (document.activeElement !== $("grFlat")) $("grFlat").checked = g.limits.flatten_on_drawdown;
+  $("grReset").disabled = !halted;
+  $("grStatus").innerHTML = (halted ? `<span class="neg">${esc(halted)}</span><br>` : "") +
+    `${g.state.orders_today}/${g.limits.max_orders_per_day} orders today · peak equity ${g.state.peak_equity ? money(g.state.peak_equity, 0) : "—"}` +
+    (g.state.consecutive_failures ? ` · ${g.state.consecutive_failures} failed cycles in a row` : "");
+}
+
+function renderBoard() {
+  const b = S.leaderboard || [];
+  $("board").innerHTML = b.length ? `<table class="mono"><thead><tr><th>#</th><th>Fund</th><th class="num">Equity</th><th class="num">Return</th></tr></thead><tbody>${b.map((r, i) => `<tr>
+    <td class="muted">${i + 1}</td><td><b>${esc(r.fund)}</b>${r.halted ? ' <span class="neg">halted</span>' : ""}</td><td class="num">${money(r.equity, 0)}</td>
+    <td class="num ${r.return >= 0 ? "pos" : "neg"}">${pct(r.return)}</td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty">Run funds on Local paper to rank them here</div>`;
 }
 
 function renderLog() {
@@ -440,6 +486,11 @@ document.querySelectorAll(".tab").forEach((t) => t.onclick = () => {
   document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x === t));
   $("tape").hidden = t.dataset.tab !== "tape"; $("log").hidden = t.dataset.tab !== "log";
 });
+
+$("grSave").onclick = () => act(() => api("/api/guardrails", { fund: fund(), limits: {
+  max_drawdown_pct: $("grDd").value / 100, max_orders_per_day: $("grCap").value, reentry_cooldown_minutes: $("grCool").value,
+  safe_mode_after_failures: $("grFails").value, flatten_on_drawdown: $("grFlat").checked } }), "Guardrail limits saved");
+$("grReset").onclick = () => { if (confirm("Clear the halt and let the agents trade again?")) act(() => api("/api/guardrails", { fund: fund(), action: "reset" }), "Halt cleared"); };
 
 $("killBtn").onclick = () => $("killDlg").showModal();
 $("killCancel").onclick = () => $("killDlg").close();

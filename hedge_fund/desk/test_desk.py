@@ -39,7 +39,7 @@ def desk(tmp_path, monkeypatch):
         "strategies": [{"name": "solo", "models": [{"name": "bull"}]}],
         "risk": {"max_position_pct": 0.5, "max_gross_exposure": 1.0},
     }))
-    d = Desk(mandates_dir=mandates, paper_dir=tmp_path / "paper",
+    d = Desk(mandates_dir=mandates, paper_dir=tmp_path / "paper", guard_dir=tmp_path / "guard",
              data_client_factory=FakeData,
              fund_factory=lambda spec: Fund(spec, models={"solo": [Bull()]}))
     monkeypatch.setattr("hedge_fund.desk.desk.us_market_open", lambda now=None: True)
@@ -117,3 +117,47 @@ def test_market_hours():
     assert us_market_open(datetime(2026, 9, 24, 10, 0, tzinfo=ny))
     assert not us_market_open(datetime(2026, 9, 24, 9, 0, tzinfo=ny))
     assert not us_market_open(datetime(2026, 9, 26, 12, 0, tzinfo=ny))  # Saturday
+
+
+def test_guardrail_cooldown_holds_reentry(desk):
+    job_id = desk.start_cycle("f", ["AAPL"], "paper", auto_execute=True)
+    _wait(desk, job_id, "done")
+    desk.manual_order("f", "paper", "AAPL", "sell", 5)  # a human trims; the agents want back in
+    again = desk.start_cycle("f", ["AAPL"], "paper", auto_execute=True)
+    job = _wait(desk, again, "done")
+    assert job["results"][0]["blocked"].startswith("re-entry cooldown")
+
+
+def test_drawdown_breaker_stops_autopilot(desk):
+    desk.guardrails("f").check_equity(10_000)
+    assert desk.guardrails("f").check_equity(8_000).startswith("drawdown breaker")
+    desk.start_autopilot("f", ["AAPL"], "paper", interval_minutes=60)
+    for _ in range(100):
+        if desk.autopilot.get("last_skip"):
+            break
+        time.sleep(0.01)
+    assert "halted" in desk.autopilot["last_skip"]
+    assert desk.autopilot.get("last_job") is None
+    desk.stop_autopilot()
+
+
+def test_safe_mode_after_failures(desk):
+    g = desk.guardrails("f")
+    assert g.cycle_result(ok=False) is None
+    assert g.cycle_result(ok=False) is None
+    assert g.cycle_result(ok=False).startswith("safe mode")
+    g.reset()
+    assert desk.guardrails("f").state.tripped is None
+
+
+def test_leaderboard_ranks_paper_books(desk, tmp_path):
+    (tmp_path / "mandates" / "g.yaml").write_text(yaml.safe_dump({
+        "name": "g", "capital": 10_000,
+        "strategies": [{"name": "solo", "models": [{"name": "bull"}]}],
+        "risk": {"max_position_pct": 0.5, "max_gross_exposure": 1.0},
+    }))
+    desk.manual_order("f", "paper", "AAPL", "buy", 1)
+    PaperBroker(tmp_path / "paper" / "g.json", cash=12_000.0)
+    board = desk.leaderboard()
+    assert [r["fund"] for r in board] == ["g", "f"]
+    assert board[0]["return"] == pytest.approx(0.2)

@@ -18,6 +18,13 @@ Usage::
         persistent local book (~/.hedge-fund/paper/), --broker alpaca trades
         your Alpaca paper account (ALPACA_API_KEY / ALPACA_SECRET_KEY).
 
+    aihf simulate [--weeks 52] [--serve]
+        The whole stack on a synthetic market, no keys: every analyst, the
+        desk's autopilot, guardrails, paper books, leaderboard.
+
+    aihf calibrate ~/prediction-market-analysis/data/kalshi
+        Fit the longshot-bias correction the prediction-market analyst uses.
+
     aihf web [--port 8765] [--open]
         The trading desk: a local web dashboard to preview the agents'
         trades, approve them, run them on autopilot, and hit a kill switch.
@@ -60,6 +67,10 @@ def main() -> None:
     ensure_mandates_dir()
     if len(sys.argv) > 1 and sys.argv[1] == "web":
         return _web(sys.argv[2:])
+    if len(sys.argv) > 1 and sys.argv[1] == "calibrate":
+        return _calibrate(sys.argv[2:])
+    if len(sys.argv) > 1 and sys.argv[1] == "simulate":
+        return _simulate(sys.argv[2:])
     parser = argparse.ArgumentParser(
         prog="aihf",
         description="Run the AI hedge fund. No arguments: launch the "
@@ -198,6 +209,44 @@ def _web(argv: list[str]) -> None:
     from hedge_fund.web import serve
 
     serve(args.host, args.port, open_browser=args.open)
+
+
+def _simulate(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(
+        prog="aihf simulate",
+        description="Run the whole fund stack (all analysts, desk, guardrails, paper broker) "
+        "week by week on a synthetic market — no API keys needed.")
+    parser.add_argument("--weeks", type=int, default=52)
+    parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--crash-week", type=int, default=40, help="week of a -26%% market crash (-1 for none)")
+    parser.add_argument("--max-drawdown", type=float, default=0.20, help="drawdown breaker threshold (default 0.20)")
+    parser.add_argument("--serve", action="store_true", help="open the trading desk on the simulated books afterwards")
+    args = parser.parse_args(argv)
+    from hedge_fund.desk.simulation import print_report, simulate
+
+    report = simulate(args.weeks, args.seed, None if args.crash_week < 0 else args.crash_week,
+                      max_drawdown=args.max_drawdown)
+    print_report(report)
+    if args.serve:
+        from hedge_fund.web import serve
+
+        serve(open_browser=True, desk=report["desk"])
+
+
+def _calibrate(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(
+        prog="aihf calibrate",
+        description="Fit the prediction-market calibration curve (win rate by price) from "
+        "Jon-Becker/prediction-market-analysis's Kalshi dataset. Needs `pip install duckdb`.")
+    parser.add_argument("data_dir", help="the dataset's kalshi directory, holding trades/ and markets/ parquet")
+    args = parser.parse_args(argv)
+    from hedge_fund.predictions import Calibration
+
+    cal = Calibration.fit_kalshi_dataset(args.data_dir)
+    path = cal.save()
+    print(f"fit {len(cal.table)} price buckets from {args.data_dir} -> {path}")
+    for cents in (5, 10, 25, 50, 75, 90, 95):
+        print(f"  market {cents:>2}c  ->  wins {cal(cents / 100):.1%}")
 
 
 if __name__ == "__main__":

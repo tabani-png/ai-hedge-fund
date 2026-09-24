@@ -22,6 +22,7 @@ ENV_PATH = USER_DIR / ".env"
 # The example mandate ships inside the package; it is copied out (never read
 # in place) so users edit their copy, not the install.
 EXAMPLE_MANDATE = Path(__file__).resolve().parent / "fund" / "example.yaml"
+MULTI_REPO_MANDATE = Path(__file__).resolve().parent / "fund" / "multi-repo.yaml"
 
 
 def ensure_mandates_dir() -> Path:
@@ -29,4 +30,5 @@ def ensure_mandates_dir() -> Path:
     if not MANDATES_DIR.exists():
         MANDATES_DIR.mkdir(parents=True)
         shutil.copy(EXAMPLE_MANDATE, MANDATES_DIR / "example.yaml")
+        shutil.copy(MULTI_REPO_MANDATE, MANDATES_DIR / "multi-repo.yaml")
     return MANDATES_DIR
