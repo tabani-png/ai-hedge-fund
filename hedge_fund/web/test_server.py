@@ -83,3 +83,15 @@ def test_backtest_over_http(base):
     tick = json.loads(_get(f"{base}/api/backtest-cycle?id={out['job']}&i=0")[1])
     assert tick["fund"] == "f" and tick["strategies"]
     assert _post(base + "/api/backtest", {"fund": "f", "tickers": "AAPL", "start": end, "end": start})[0] == 400
+
+
+@pytest.mark.parametrize("path", ["/", "/index.html", "/desk", "/?fund=f", "//", "/%20"])
+def test_any_page_path_serves_the_dashboard(base, path):
+    status, body = _get(base + path)
+    assert status == 200 and b"AIHF" in body
+
+
+def test_unknown_api_route_is_a_json_404(base):
+    with pytest.raises(urllib.error.HTTPError) as err:
+        _get(base + "/api/nope")
+    assert err.value.code == 404
