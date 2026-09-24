@@ -25,10 +25,29 @@ EXAMPLE_MANDATE = Path(__file__).resolve().parent / "fund" / "example.yaml"
 MULTI_REPO_MANDATE = Path(__file__).resolve().parent / "fund" / "multi-repo.yaml"
 
 
-def ensure_mandates_dir() -> Path:
-    """Create the mandates dir on first use, seeded with the example."""
-    if not MANDATES_DIR.exists():
-        MANDATES_DIR.mkdir(parents=True)
-        shutil.copy(EXAMPLE_MANDATE, MANDATES_DIR / "example.yaml")
-        shutil.copy(MULTI_REPO_MANDATE, MANDATES_DIR / "multi-repo.yaml")
-    return MANDATES_DIR
+# Mandates that ship with the package, by the filename they are copied to.
+SHIPPED_MANDATES = {"example.yaml": EXAMPLE_MANDATE, "multi-repo.yaml": MULTI_REPO_MANDATE}
+_SEEDED_MARKER = ".seeded"
+
+
+def ensure_mandates_dir(mandates_dir: Path | None = None) -> Path:
+    """Create the mandates dir on first use, and seed each shipped mandate
+    exactly once — including ones added in a later release, so upgrading
+    users get them too. The `.seeded` marker remembers what was offered, so
+    a mandate the user deleted is never resurrected."""
+    mandates_dir = mandates_dir or MANDATES_DIR
+    marker = mandates_dir / _SEEDED_MARKER
+    if marker.exists():
+        seeded = set(marker.read_text().split())
+    elif mandates_dir.exists():
+        seeded = {"example.yaml"}  # a pre-marker install already had its example
+    else:
+        seeded = set()
+    mandates_dir.mkdir(parents=True, exist_ok=True)
+    for name, source in SHIPPED_MANDATES.items():
+        if name not in seeded:
+            if not (mandates_dir / name).exists():
+                shutil.copy(source, mandates_dir / name)
+            seeded.add(name)
+    marker.write_text("\n".join(sorted(seeded)) + "\n")
+    return mandates_dir
