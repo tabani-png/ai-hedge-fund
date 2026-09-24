@@ -235,17 +235,32 @@ class SimPmxt:
     def __init__(self, market: SimMarket, clock) -> None:
         self.market, self.clock = market, clock
 
-    def fetch_markets(self, query=None):
-        day = self.clock().date()
+    QUERIES = ("US recession", "Fed rate cut")
+
+    def _yes(self, query, day):
         while day not in self.market.recession and day > self.market.days[0]:
             day -= timedelta(days=1)
         rec = float(self.market.recession[day])
-        yes = {"US recession": rec, "Fed rate cut": min(0.95, 0.35 + 0.3 * (rec - 0.3))}.get(query)
-        if yes is None:
+        return round({"US recession": rec, "Fed rate cut": min(0.95, 0.35 + 0.3 * (rec - 0.3))}[query], 2)
+
+    def fetch_markets(self, query=None):
+        if query not in self.QUERIES:
             return []
+        yes = self._yes(query, self.clock().date())
         return [SimpleNamespace(title=f"{query} by year end?", url="sim://", volume_24h=1e6, liquidity=1e6,
-                                outcomes=[SimpleNamespace(label="Yes", price=round(yes, 2)),
-                                          SimpleNamespace(label="No", price=round(1 - yes, 2))])]
+                                outcomes=[SimpleNamespace(label="Yes", price=yes, outcome_id=query),
+                                          SimpleNamespace(label="No", price=round(1 - yes, 2), outcome_id=query + ":no")])]
+
+    def fetch_ohlcv(self, outcome_id, resolution="1d", start=None, end=None, limit=None):
+        """Daily candles stamped at the 20:00 UTC close, only up to `end`."""
+        candles = []
+        for day in self.market.days:
+            stamp = datetime(day.year, day.month, day.day, 20, tzinfo=ZoneInfo("UTC"))
+            if (start and stamp < start) or (end and stamp > end):
+                continue
+            p = self._yes(outcome_id, day)
+            candles.append(SimpleNamespace(timestamp=stamp, open=p, high=p, low=p, close=p, volume=1e5))
+        return candles
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +309,9 @@ def _fund_factory(market: SimMarket, clock, cache_dir: Path):
 # ---------------------------------------------------------------------------
 
 def simulate(weeks: int = 52, seed: int = 7, crash_week: int | None = 40, workdir: Path | None = None,
-             progress=print, max_drawdown: float = 0.20) -> dict:
+             progress=print, max_drawdown: float = 0.20, backtest_weeks: int = 52) -> dict:
+    if crash_week is not None and not 0 < crash_week < weeks:
+        crash_week = None  # a crash past the end of the run never happens
     workdir = Path(workdir or tempfile.mkdtemp(prefix="aihf-sim-"))
     (workdir / "mandates").mkdir(parents=True, exist_ok=True)
     for name, data in _funds().items():
@@ -311,16 +328,41 @@ def simulate(weeks: int = 52, seed: int = 7, crash_week: int | None = 40, workdi
     desk.limits = GuardrailLimits(reentry_cooldown_minutes=240, max_orders_per_day=40, max_drawdown_pct=max_drawdown,
                                   flatten_on_drawdown=True, safe_mode_after_failures=3)
     funds = list(_funds())
+    violations: list[str] = []
     pilots = {f: {"enabled": True, "fund": f, "broker": "paper", "universe": UNIVERSE, "interval_minutes": 7 * 24 * 60,
                   "auto_execute": True, "market_hours_only": False, "next_run": 0, "last_job": None,
                   "last_skip": None} for f in funds}
 
+    # 1) Backtest every fund over the year BEFORE the forward run — through the
+    #    desk's backtest jobs, the same path the dashboard's Backtest button takes.
+    bt_end = (now["t"] - timedelta(days=3)).date().isoformat()
+    bt_start = (now["t"] - timedelta(weeks=backtest_weeks)).date().isoformat()
+    backtests: dict[str, dict] = {}
+    if backtest_weeks:
+        for f in funds:
+            job = _wait(desk, desk.start_backtest(f, UNIVERSE, bt_start, bt_end), timeout=300)
+            if job["status"] != "done":
+                violations.append(f"backtest {f}: {job['status']} — {job.get('error')}")
+                continue
+            result = job["result"]
+            for rec in result.records:
+                _check_record(rec, f"backtest {f} {rec.as_of}", violations)
+            backtests[f] = {**job["metrics"], "dates": result.dates, "nav": result.nav,
+                            "benchmark_nav": result.benchmark_nav,
+                            "odds_views": [next((s.value for sr in r.strategies for s in sr.signals
+                                                 if s.model_name == "prediction_markets" and not s.metadata.get("abstained")), None)
+                                           for r in result.records]}
+            if progress:
+                m = job["metrics"]
+                progress(f"  backtest {f:<20} {m['total_return_pct']:+.1%} vs SPY {m['benchmark_return_pct']:+.1%}  "
+                         f"sharpe {m['sharpe_ratio']:.2f}  max dd {m['max_drawdown_pct']:.1%}  ({m['n_cycles']} cycles)")
+
+    # 2) Then run them forward on autopilot, week by week.
     curve: dict[str, list[float]] = {f: [] for f in [*funds, "SPY"]}
     net: dict[str, list[float]] = {f: [] for f in funds}
     odds_view: list[float] = []
     dates: list[str] = []
     events: list[dict] = []
-    violations: list[str] = []
     spy0 = market._close_on("SPY", now["t"].date())
     t0 = time.time()
     for week in range(weeks):
@@ -371,6 +413,7 @@ def simulate(weeks: int = 52, seed: int = 7, crash_week: int | None = 40, workdi
         "workdir": str(workdir), "weeks": weeks, "seed": seed, "start": dates[0], "end": dates[-1],
         "crash_week": crash_week, "universe": UNIVERSE, "seconds": round(time.time() - t0, 1),
         "funds": {f: _stats(curve[f]) for f in [*funds, "SPY"]},
+        "backtests": backtests, "backtest_window": [bt_start, bt_end],
         "leaderboard": desk.leaderboard(), "events": events, "violations": violations,
         "dates": dates, "curves": curve, "net_exposure": net, "odds_view": odds_view,
     }
@@ -389,16 +432,29 @@ def _check_book(desk: Desk, fund: str, job: dict, week: int, violations: list[st
     book = {p["ticker"]: p["shares"] for p in acct["positions"]}
     if book != record.positions:
         violations.append(f"week {week} {fund}: receipt positions differ from the broker's book")
+    _check_record(record, f"week {week} {fund}", violations)
     limit = record.spec.risk.max_position_pct
-    for t, w in record.final_weights.items():
-        if abs(w) > limit + 1e-9:
-            violations.append(f"week {week} {fund}: {t} target {w:.1%} breaches the {limit:.0%} cap")
     for p in acct["positions"]:
         if p["value"] is not None and abs(p["value"]) / record.equity_before > limit + 0.02:
             violations.append(f"week {week} {fund}: {p['ticker']} is {abs(p['value']) / record.equity_before:.1%} of equity")
+
+
+def _check_record(record, where: str, violations: list[str]) -> None:
+    """Invariants any cycle record must hold, live or backtested."""
+    limit = record.spec.risk.max_position_pct
+    for t, w in record.final_weights.items():
+        if abs(w) > limit + 1e-9:
+            violations.append(f"{where}: {t} target {w:.1%} breaches the {limit:.0%} cap")
     gross = sum(abs(w) for w in record.final_weights.values())
     if gross > record.spec.risk.max_gross_exposure + 1e-9:
-        violations.append(f"week {week} {fund}: gross {gross:.2f} breaches its cap")
+        violations.append(f"{where}: gross {gross:.2f} breaches its cap")
+    nav = record.cash + sum(s * record.marks[t] for t, s in record.positions.items())
+    if abs(nav - record.nav) > 0.01:
+        violations.append(f"{where}: NAV {record.nav} does not reconcile to {nav}")
+    for sr in record.strategies:
+        for sig in sr.signals:
+            if sig.date != record.as_of:
+                violations.append(f"{where}: {sig.model_name} formed its view for {sig.date}")
 
 
 def _stats(curve: list[float]) -> dict:
@@ -441,8 +497,16 @@ def _num(text: str, pattern: str) -> float | None:
 
 
 def print_report(report: dict) -> None:
-    print(f"\nSimulated {report['weeks']} weeks ({report['start']} → {report['end']}), seed {report['seed']}, "
-          f"crash in week {report['crash_week']}, {report['seconds']}s\n")
+    print(f"\nSimulated seed {report['seed']}, {report['seconds']}s")
+    if report.get("backtests"):
+        a, b = report["backtest_window"]
+        print(f"\nBACKTEST {a} → {b} (history before the forward run)")
+        print(f"{'fund':<22}{'return':>9}{'vs SPY':>9}{'sharpe':>8}{'max dd':>8}{'cycles':>8}")
+        for f, m in report["backtests"].items():
+            print(f"{f:<22}{m['total_return_pct']:>+9.1%}{m['benchmark_return_pct']:>+9.1%}{m['sharpe_ratio']:>8.2f}"
+                  f"{m['max_drawdown_pct']:>8.1%}{m['n_cycles']:>8}")
+    print(f"\nFORWARD {report['start']} → {report['end']} on autopilot ({report['weeks']} weeks, "
+          f"crash in week {report['crash_week']})")
     print(f"{'fund':<22}{'final':>12}{'return':>9}{'sharpe':>8}{'max dd':>8}")
     for f, s in report["funds"].items():
         print(f"{f:<22}{s['final']:>12,.0f}{s['return']:>+9.1%}{s['sharpe']:>8.2f}{s['max_drawdown']:>8.1%}")

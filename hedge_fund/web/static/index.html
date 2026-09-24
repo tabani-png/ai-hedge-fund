@@ -7,6 +7,7 @@
 <link rel="icon" href="data:,">
 <style>
 :root {
+  color-scheme: dark;
   --bg: #0b0e14; --panel: #121722; --panel2: #171d2b; --line: #232b3d;
   --text: #e6e9f0; --muted: #8a93a8; --dim: #5d6680;
   --green: #22c55e; --red: #ef4444; --amber: #f59e0b; --blue: #60a5fa; --violet: #a78bfa;
@@ -22,7 +23,7 @@ header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding
 .brand { font-weight: 700; letter-spacing: .02em; margin-right: 8px; }
 .brand span { color: var(--green); }
 .spacer { flex: 1; }
-select, input[type=text], input[type=number], input[type=password] {
+select, input[type=text], input[type=number], input[type=password], input[type=date] {
   background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; min-width: 0; }
 select:focus, input:focus { outline: 2px solid #2b3a5c; }
 .btn { border: 1px solid var(--line); background: var(--panel2); border-radius: 8px; padding: 8px 14px;
@@ -146,6 +147,18 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
             <button class="btn go" id="runTradeBtn">Run &amp; trade</button>
           </div>
           <div class="muted" style="font-size:12px">Preview shows the agents' proposed orders for your approval. Run &amp; trade executes them straight away.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Backtest</h2>
+        <div class="body">
+          <div class="row">
+            <label class="field">From<input type="date" id="btStart"></label>
+            <label class="field">To<input type="date" id="btEnd"></label>
+          </div>
+          <button class="btn primary" id="btRun">Backtest this fund</button>
+          <div class="muted" style="font-size:12px">Replays the fund over history at its rebalance cadence on the same tickers: every agent, blend, and risk limit, point-in-time. Compared against the mandate's benchmark.</div>
         </div>
       </div>
 
@@ -280,7 +293,9 @@ async function refresh() {
     S = await api(`/api/state?fund=${encodeURIComponent(fund() || store.get("fund", ""))}&broker=${encodeURIComponent(broker() || store.get("broker", "paper"))}`);
   } catch (e) { toast("Desk unreachable: " + e.message, true); return; }
   renderHeader(); renderAccount(); renderAutopilot(); renderJobs(); renderLog(); renderGuardrails(); renderBoard();
-  if (selectedJob) await loadJob(selectedJob, true);
+  const live = ["running", "executing", "awaiting_approval"];
+  if (selectedJob && (!jobDetail || jobDetail.id !== selectedJob || live.includes(jobDetail.status)
+      || live.includes(S.jobs.find((x) => x.id === selectedJob)?.status))) await loadJob(selectedJob, true);
 }
 
 function renderHeader() {
@@ -360,7 +375,8 @@ function renderJobs() {
   if (!selectedJob && S.jobs.length) selectedJob = S.jobs[0].id;
   $("jobs").innerHTML = S.jobs.map((j) => {
     const [label, cls] = STATUS[j.status] || [j.status, ""];
-    return `<span class="pill jobchip ${j.id === selectedJob ? "sel" : ""}" data-job="${j.id}"><span class="dot ${cls}"></span>${esc(j.started.slice(11, 16))} ${esc(label)}${j.source === "autopilot" ? " · auto" : ""}</span>`;
+    const what = j.kind === "backtest" ? `Backtest ${j.status === "running" && j.progress?.[1] ? j.progress[0] + "/" + j.progress[1] : label}` : label;
+    return `<span class="pill jobchip ${j.id === selectedJob ? "sel" : ""}" data-job="${j.id}"><span class="dot ${cls}"></span>${esc(j.started.slice(11, 16))} ${esc(what)}${j.source === "autopilot" ? " · auto" : ""}</span>`;
   }).join("");
   $("jobs").hidden = !S.jobs.length;
 }
@@ -378,12 +394,22 @@ function convictionBar(v) {
 function renderCycle() {
   const j = jobDetail; if (!j) return;
   const [label] = STATUS[j.status] || [j.status];
-  $("cycleMeta").textContent = `${j.fund} · ${S.brokers[j.broker]?.label || j.broker} · ${j.universe.join(", ")}`;
+  $("cycleMeta").textContent = `${j.fund} · ${j.kind === "backtest" ? `backtest ${j.start} → ${j.end}` : S.brokers[j.broker]?.label || j.broker} · ${j.universe.join(", ")}`;
   let h = "";
   if (j.status === "running") h += `<div class="banner"><span class="spin"></span> The agents are researching ${esc(j.universe.join(", "))}… this can take a minute or two.</div>`;
   if (j.status === "failed" || j.status === "stale") h += `<div class="banner live">${esc(j.error || label)}</div>`;
   const r = j.record;
-  if (r) {
+  if (j.kind === "backtest") h += backtestHtml(j);
+  else if (r) h += recordHtml(r, j);
+  $("cycle").innerHTML = h || `<div class="empty">${esc(label)}</div>`;
+  $("approveBtn")?.addEventListener("click", () => act(() => api("/api/approve", { id: j.id }), "Approved — sending orders"));
+  $("rejectBtn")?.addEventListener("click", () => act(() => api("/api/reject", { id: j.id }), "Rejected"));
+  if (j.kind === "backtest") wireBacktest(j);
+}
+
+function recordHtml(r, j) {
+  let h = "";
+  {
     if (j.status === "awaiting_approval") h += `<div class="banner approve row"><div><b>${r.orders.length} orders proposed.</b> Nothing has been sent yet.</div>
       <button class="btn go" id="approveBtn">Approve &amp; execute</button><button class="btn" id="rejectBtn">Reject</button></div>`;
     const results = {}; (j.results || []).forEach((x) => results[x.order.ticker] = x);
@@ -412,9 +438,115 @@ function renderCycle() {
       }
     }
   }
-  $("cycle").innerHTML = h || `<div class="empty">${esc(label)}</div>`;
-  $("approveBtn")?.addEventListener("click", () => act(() => api("/api/approve", { id: j.id }), "Approved — sending orders"));
-  $("rejectBtn")?.addEventListener("click", () => act(() => api("/api/reject", { id: j.id }), "Rejected"));
+  return h;
+}
+
+// ---------------------------------------------------------------- backtests
+const FUND_C = "#3987e5", BENCH_C = "#d95926";  // validated categorical pair on the dark surface
+let btCycle = null;  // {job, i, record} — a drilled-into backtest tick
+
+function backtestHtml(j) {
+  let h = "";
+  const [done, total] = j.progress || [0, 0];
+  if (j.status === "running") h += `<div class="banner"><span class="spin"></span> Backtesting ${esc(j.start)} → ${esc(j.end)}: cycle ${done}${total ? " of " + total : ""}. Every tick is a full agent cycle, so LLM funds take a while.</div>`;
+  const m = j.metrics;
+  if (m) h += `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(110px,1fr))">
+    ${tile("Return", pct(m.total_return_pct), m.total_return_pct >= 0 ? "pos" : "neg", "annualized " + pct(m.annualized_return_pct))}
+    ${tile("Benchmark", pct(m.benchmark_return_pct), m.benchmark_return_pct >= 0 ? "pos" : "neg", "same capital, same dates")}
+    ${tile("Excess", pct(m.excess_return_pct), m.excess_return_pct >= 0 ? "pos" : "neg", "fund minus benchmark")}
+    ${tile("Sharpe", m.sharpe_ratio.toFixed(2), "", "annualized")}
+    ${tile("Max drawdown", pct(-m.max_drawdown_pct), "neg", `${m.n_cycles} cycles · ${m.n_orders} orders`)}</div>`;
+  if ((j.nav || []).length > 1) h += chartHtml(j);
+  if (btCycle && btCycle.job === j.id) {
+    const fills = {}; (btCycle.record.fills || []).forEach((f) => fills[f.ticker] = { order: f, fill: f });
+    h += `<div class="row" style="margin-top:6px"><div><b>Rebalance ${esc(btCycle.record.as_of)}</b> <span class="muted">— NAV ${money(btCycle.record.nav, 0)}</span></div>
+      <button class="btn ghost" id="btBack">Back to all rebalances</button></div>` + recordHtml(btCycle.record, { status: "done", results: Object.values(fills) });
+  } else if ((j.cycles || []).length) {
+    h += `<div class="muted" style="font-size:12px;margin-top:4px">Every rebalance${j.status === "done" ? " — click one to see its orders and each agent's thesis" : ""}</div>
+      <div class="scroll"><table class="mono"><thead><tr><th>Date</th><th class="num">NAV</th><th class="num">Orders</th><th class="num">Net</th><th class="num">Gross</th><th>Largest positions</th></tr></thead><tbody>` +
+      j.cycles.map((c, i) => `<tr data-bt="${i}" style="cursor:${j.status === "done" ? "pointer" : "default"}"><td>${esc(c.date)}</td><td class="num">${money(c.nav, 0)}</td><td class="num">${c.orders}</td>
+        <td class="num ${c.net >= 0 ? "pos" : "neg"}">${pct(c.net)}</td><td class="num">${(c.gross * 100).toFixed(0)}%</td>
+        <td>${c.top.map(([t, w]) => `<span class="${w >= 0 ? "pos" : "neg"}">${esc(t)} ${(w * 100).toFixed(0)}%</span>`).join(" · ")}</td></tr>`).reverse().join("") + `</tbody></table></div>`;
+  }
+  return h;
+}
+
+function tile(label, value, cls, sub) {
+  return `<div class="kpi"><div class="label">${label}</div><div class="value mono ${cls}" style="font-size:18px">${value}</div><div class="sub">${esc(sub)}</div></div>`;
+}
+
+function chartHtml(j) {
+  const W = 640, H = 230, L = 64, R = 70, T = 12, B = 26;
+  const nav = j.nav, bench = j.benchmark_nav.map((v) => v ?? NaN);
+  const vals = nav.concat(bench.filter((v) => !isNaN(v)));
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
+  const x = (i) => L + (W - L - R) * (nav.length === 1 ? 0 : i / (nav.length - 1));
+  const y = (v) => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  const path = (arr) => arr.map((v, i) => isNaN(v) ? "" : `${i && !isNaN(arr[i - 1]) ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  const ticks = [lo + pad, (lo + hi) / 2, hi - pad];
+  const n = nav.length - 1, lastB = bench[bench.length - 1];
+  const label = (v, c, txt, dy) => `<text x="${W - R + 6}" y="${(y(v) + dy).toFixed(1)}" fill="var(--text)" font-size="11"><tspan fill="${c}">■</tspan> ${txt}</text>`;
+  const gap = Math.abs(y(nav[n]) - y(lastB)) < 14 ? (y(nav[n]) < y(lastB) ? [-4, 10] : [10, -4]) : [4, 4];
+  return `<div id="btChartWrap" style="position:relative">
+    <div class="row" style="font-size:12px;color:var(--muted);gap:14px;flex:0">
+      <span style="flex:0;white-space:nowrap"><svg width="18" height="8"><line x1="0" y1="4" x2="18" y2="4" stroke="${FUND_C}" stroke-width="2"/></svg> ${esc(j.fund)}</span>
+      <span style="flex:0;white-space:nowrap"><svg width="18" height="8"><line x1="0" y1="4" x2="18" y2="4" stroke="${BENCH_C}" stroke-width="2" stroke-dasharray="4 3"/></svg> Benchmark</span></div>
+    <svg id="btChart" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="Fund NAV versus benchmark over the backtest">
+      ${ticks.map((t) => `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${L - 6}" y="${y(t) + 4}" text-anchor="end" fill="var(--muted)" font-size="11">${money(t, 0)}</text>`).join("")}
+      <text x="${L}" y="${H - 6}" fill="var(--muted)" font-size="11">${esc(j.dates[0])}</text>
+      <text x="${W - R}" y="${H - 6}" fill="var(--muted)" font-size="11" text-anchor="end">${esc(j.dates[n])}</text>
+      <path d="${path(bench)}" fill="none" stroke="${BENCH_C}" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>
+      <path d="${path(nav)}" fill="none" stroke="${FUND_C}" stroke-width="2" stroke-linejoin="round"/>
+      ${label(nav[n], FUND_C, money(nav[n], 0), gap[0])}${isNaN(lastB) ? "" : label(lastB, BENCH_C, money(lastB, 0), gap[1])}
+      <line id="btX" y1="${T}" y2="${H - B}" stroke="var(--dim)" visibility="hidden"/>
+      <circle id="btDf" r="4" fill="${FUND_C}" stroke="var(--panel)" stroke-width="2" visibility="hidden"/>
+      <circle id="btDb" r="4" fill="${BENCH_C}" stroke="var(--panel)" stroke-width="2" visibility="hidden"/>
+      <rect id="btHit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/>
+    </svg>
+    <div id="btTip" class="banner mono" style="position:absolute;pointer-events:none;display:none;font-size:12px;padding:6px 10px;white-space:nowrap"></div>
+  </div>`;
+}
+
+function wireBacktest(j) {
+  const hit = $("btHit");
+  if (hit) {
+    const svg = $("btChart"), n = j.nav.length - 1;
+    const show = (ev) => {
+      const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+      const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+      const L = 64, W = 640 - 70;
+      const i = Math.max(0, Math.min(n, Math.round((p.x - L) / (W - L) * n)));
+      const xi = L + (W - L) * (n ? i / n : 0);
+      const b = j.benchmark_nav[i];
+      [["btX", null], ["btDf", j.nav[i]], ["btDb", b]].forEach(([id, v]) => {
+        const el = $(id); el.setAttribute("visibility", v === undefined || (id !== "btX" && v == null) ? "hidden" : "visible");
+        if (id === "btX") { el.setAttribute("x1", xi); el.setAttribute("x2", xi); }
+        else if (v != null) { el.setAttribute("cx", xi); el.setAttribute("cy", yOf(j, v)); }
+      });
+      const tip = $("btTip"), wrap = $("btChartWrap").getBoundingClientRect();
+      tip.innerHTML = `${esc(j.dates[i])}<br><span style="color:${FUND_C}">■</span> fund ${money(j.nav[i], 0)}` +
+        (b != null ? `<br><span style="color:${BENCH_C}">■</span> bench ${money(b, 0)}` : "") + `<br>${j.cycles[i] ? j.cycles[i].orders + " orders" : ""}`;
+      tip.style.display = "block";
+      const left = ev.clientX - wrap.left + 14;
+      tip.style.left = Math.min(left, wrap.width - tip.offsetWidth - 4) + "px"; tip.style.top = "30px";
+    };
+    hit.addEventListener("mousemove", show);
+    hit.addEventListener("mouseleave", () => { ["btX", "btDf", "btDb"].forEach((id) => $(id).setAttribute("visibility", "hidden")); $("btTip").style.display = "none"; });
+  }
+  $("cycle").querySelectorAll("[data-bt]").forEach((row) => row.onclick = async () => {
+    if (j.status !== "done") return;
+    const i = +row.dataset.bt;
+    try { btCycle = { job: j.id, i, record: await api(`/api/backtest-cycle?id=${j.id}&i=${i}`) }; renderCycle(); }
+    catch (e) { toast(e.message, true); }
+  });
+  $("btBack")?.addEventListener("click", () => { btCycle = null; renderCycle(); });
+}
+
+function yOf(j, v) {
+  const H = 230, T = 12, B = 26;
+  const vals = j.nav.concat(j.benchmark_nav.filter((x) => x != null));
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
+  return T + (H - T - B) * (1 - (v - lo) / (hi - lo));
 }
 
 function renderGuardrails() {
@@ -459,6 +591,14 @@ async function startCycle(auto) {
 }
 
 $("previewBtn").onclick = () => startCycle(false);
+(() => { const end = new Date(), start = new Date(Date.now() - 78 * 7 * 864e5);
+  $("btEnd").value = end.toISOString().slice(0, 10); $("btStart").value = start.toISOString().slice(0, 10); })();
+$("btRun").onclick = async () => {
+  if (!tickers().trim()) return toast("Add at least one ticker", true);
+  store.set("tickers:" + fund(), tickers());
+  const out = await act(() => api("/api/backtest", { fund: fund(), tickers: tickers(), start: $("btStart").value, end: $("btEnd").value }), "Backtest started");
+  if (out) { selectedJob = out.job; btCycle = null; await loadJob(out.job); renderJobs(); }
+};
 $("runTradeBtn").onclick = () => startCycle(true);
 $("fund").onchange = () => { store.set("fund", fund()); loadTickers(); refresh(); };
 $("broker").onchange = () => { store.set("broker", broker()); refresh(); };

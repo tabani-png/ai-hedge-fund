@@ -103,7 +103,7 @@ def test_calibration_round_trips(tmp_path):
 
 def _market(title, yes, liquidity):
     return SimpleNamespace(title=title, url="u", volume_24h=1.0, liquidity=liquidity,
-                           outcomes=[SimpleNamespace(label="Yes", price=yes), SimpleNamespace(label="No", price=1 - yes)])
+                           outcomes=[SimpleNamespace(label="Yes", price=yes, outcome_id=title), SimpleNamespace(label="No", price=1 - yes, outcome_id=title + ":no")])
 
 
 class FakePmxt:
@@ -139,3 +139,32 @@ def test_macro_odds_abstains_in_the_past_and_without_markets():
     past = (date.today() - timedelta(days=1)).isoformat()
     assert m.predict("AAPL", past, None).metadata["abstained"]
     assert m.predict("AAPL", TODAY, None).metadata["abstained"]
+
+
+class FakePmxtHistory(FakePmxt):
+    """Candles at 20:00 UTC each day: price = day-of-month / 100."""
+
+    def fetch_ohlcv(self, outcome_id, resolution="1d", start=None, end=None, limit=None):
+        from datetime import datetime, timezone
+        out = []
+        for day in range(1, 29):
+            stamp = datetime(2025, 3, day, 20, tzinfo=timezone.utc)
+            if (start and stamp < start) or (end and stamp > end):
+                continue
+            out.append(SimpleNamespace(timestamp=int(stamp.timestamp() * 1000), close=day / 100))
+        return out
+
+
+def test_quote_at_uses_that_day_close_never_later():
+    odds = PmxtOdds(client_factory=lambda: FakePmxtHistory({"US recession": [_market("R", 0.9, 1)]}))
+    assert odds.quote_at("US recession", "2025-03-10").price == pytest.approx(0.10)
+    assert odds.quote_at("US recession", "2025-02-01") is None  # market had no odds yet
+
+
+def test_backtest_date_reads_historical_odds():
+    odds = PmxtOdds(client_factory=lambda: FakePmxtHistory({
+        "US recession": [_market("R", 0.9, 1)], "Fed rate cut": [_market("C", 0.1, 1)]}))
+    s = PredictionMarketModel(odds=odds, calibration=Calibration()).predict("AAPL", "2025-03-20", None)
+    # both events at 0.20 on that date: (-1 * -0.6 + 1 * -0.6) / 2 = 0
+    assert not s.metadata and s.value == pytest.approx(0.0)
+    assert "20%" in s.reasoning

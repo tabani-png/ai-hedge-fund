@@ -7,7 +7,8 @@ from hedge_fund.desk.simulation import simulate
 
 @pytest.fixture(scope="module")
 def run(tmp_path_factory):
-    return simulate(weeks=16, seed=3, crash_week=10, workdir=tmp_path_factory.mktemp("sim"), progress=None)
+    return simulate(weeks=16, seed=3, crash_week=10, workdir=tmp_path_factory.mktemp("sim"), progress=None,
+                    backtest_weeks=16)
 
 
 def test_every_cycle_holds_its_invariants(run):
@@ -25,6 +26,14 @@ def test_every_analyst_speaks(run):
     assert seen == {"graham", "buffett", "munger", "tradingagents", "pead", "prediction_markets"}
 
 
+def test_backtests_run_every_fund_with_every_analyst(run):
+    assert set(run["backtests"]) == {"multi-repo-fund", "example-fund", "tradingagents-only"}
+    for m in run["backtests"].values():
+        assert m["n_cycles"] >= 10 and len(m["nav"]) == m["n_cycles"]
+    views = run["backtests"]["multi-repo-fund"]["odds_views"]
+    assert all(v is not None for v in views), "prediction-market analyst must read historical odds, not abstain"
+
+
 def test_odds_overlay_turns_risk_off_into_the_crash(run):
     views = run["odds_view"]
     assert views[-1] < views[0]
@@ -36,9 +45,15 @@ def test_leaderboard_and_kill_drill(run):
 
 
 def test_breaker_trips_and_halts(tmp_path):
-    r = simulate(weeks=10, seed=3, crash_week=5, workdir=tmp_path, progress=None, max_drawdown=0.03)
+    r = simulate(weeks=10, seed=3, crash_week=5, workdir=tmp_path, progress=None, max_drawdown=0.03,
+                 backtest_weeks=0)
     trips = [e for e in r["events"] if e["detail"].startswith("drawdown breaker")]
     assert trips, r["events"]
     fund = trips[0]["fund"]
     assert r["desk"].guardrails(fund).state.tripped
     assert r["violations"] == []
+
+
+def test_crash_week_past_the_run_is_ignored(tmp_path):
+    r = simulate(weeks=3, crash_week=40, workdir=tmp_path, progress=None, backtest_weeks=0)
+    assert r["crash_week"] is None and r["violations"] == []

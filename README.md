@@ -88,6 +88,7 @@ A local dashboard that lets the agents trade:
 - **Autopilot**: runs the fund every N minutes (default: the mandate's rebalance cadence), only while the market is open, and executes automatically or waits for your approval.
 - **KILL**: stops autopilot, drops pending proposals, cancels open orders, and can optionally flatten every position.
 - Live equity, P&L, positions, trade tape, activity log, a manual order ticket, each agent's conviction and written thesis, and an in-app key manager.
+- **Backtest**: replays the fund over any date range at its rebalance cadence (every agent, blend, and risk limit, point-in-time) and compares it with the mandate's benchmark. You get return, excess return, Sharpe, max drawdown, an equity curve against the benchmark, and a table of every rebalance. Click a rebalance to see its orders and each agent's thesis. Results are saved alongside the TUI's backtests.
 
 Brokers:
 
@@ -106,7 +107,7 @@ Brokers:
 | deep-value | this repo | Graham, Buffett, and Munger persona agents |
 | multi-agent-desk | [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) | a whole firm per ticker: analysts, a bull/bear debate, a trader, a risk team, and a 5-tier rating (Buy +1 … Sell -1) |
 | earnings-drift | this repo | the PEAD quant model |
-| macro-odds | [pmxt](https://github.com/pmxt-dev/pmxt) + [prediction-market-analysis](https://github.com/Jon-Becker/prediction-market-analysis) | live Polymarket/Kalshi odds on recession and rate cuts, corrected for longshot bias, applied as a risk-on/risk-off tilt |
+| macro-odds | [pmxt](https://github.com/pmxt-dev/pmxt) + [prediction-market-analysis](https://github.com/Jon-Becker/prediction-market-analysis) | live Polymarket/Kalshi odds on recession and rate cuts, corrected for longshot bias, applied as a risk-on/risk-off tilt. Backtests read each market's daily candle on or before the date, so there's no lookahead |
 
 The desk enforces [NoFx](https://github.com/NoFxAiOS/nofx)-style guardrails on top of the mandate's risk limits: re-entry cooldowns, a daily order cap, a drawdown circuit breaker (checked every 5 minutes, and it can flatten the book), and a safe mode after repeated failed cycles. The dashboard shows a leaderboard that ranks funds by return.
 
@@ -131,7 +132,7 @@ aihf calibrate ~/prediction-market-analysis/data/kalshi
 ### Simulate before you trade
 
 ```bash
-aihf simulate               # 52 weeks, 3 funds, a market crash in week 40
+aihf simulate               # backtest 3 funds over a year, then run them forward 52 weeks with a crash in week 40
 aihf simulate --serve       # then open the trading desk on the simulated books
 aihf simulate --max-drawdown 0.05   # watch the breaker trip and flatten
 ```

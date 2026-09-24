@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from hedge_fund.backtesting import backtest_fund
 from hedge_fund.brokers import AlpacaBroker, Broker, Fill, Order, PaperBroker, SimBroker
 from hedge_fund.data import CachedDataClient, FDClient
 from hedge_fund.desk.guardrails import GuardrailLimits, Guardrails
@@ -278,6 +279,83 @@ class Desk:
                 self.stop_autopilot(quiet=True)
                 self._note("error", f"{job['fund']}: {tripped} — autopilot stopped")
 
+    # ------------------------------------------------------------------
+    # Backtests: the same fund, the same run_cycle, looped over history
+    # ------------------------------------------------------------------
+
+    def start_backtest(self, fund_name: str, tickers: list[str], start: str, end: str) -> str:
+        self.spec(fund_name)  # fail fast on an unknown fund, before a thread
+        universe = normalize_universe(tickers)
+        if not start < end:
+            raise ValueError("backtest start must be before its end")
+        job_id = uuid.uuid4().hex[:10]
+        job = {
+            "id": job_id, "kind": "backtest", "fund": fund_name, "broker": "backtest", "universe": universe,
+            "source": "backtest", "status": "running", "start": start, "end": end,
+            "started": self.clock().isoformat(timespec="seconds"),
+            "progress": [0, 0], "dates": [], "nav": [], "benchmark_nav": [], "cycles": [],
+            "result": None, "error": None,
+        }
+        with self._lock:
+            self.jobs[job_id] = job
+        self._note("info", f"backtest: {fund_name} {start} → {end} over {', '.join(universe)}")
+        threading.Thread(target=self._run_backtest, args=(job_id,), daemon=True).start()
+        return job_id
+
+    def _run_backtest(self, job_id: str) -> None:
+        job = self.jobs[job_id]
+        client = self._data_client_factory()
+        try:
+            spec = self.spec(job["fund"])
+            # A fresh Fund: a backtest must not share model state with the live one.
+            fund = self._fund_factory(spec)
+            closes = {b.time[:10]: b.close for b in client.get_prices(spec.benchmark, job["start"], job["end"])}
+
+            def tick(i: int, n: int, record: CycleRecord) -> None:
+                job["progress"] = [i + 1, n]
+                job["dates"].append(record.as_of)
+                job["nav"].append(record.nav)
+                base = closes.get(job["dates"][0])
+                job["benchmark_nav"].append(spec.capital * closes[record.as_of] / base
+                                            if base and record.as_of in closes else None)
+                job["cycles"].append(_cycle_summary(record))
+
+            result = backtest_fund(fund, job["start"], job["end"], client, job["universe"], on_cycle=tick)
+            job["result"] = result
+            job["benchmark_nav"] = result.benchmark_nav
+            job["metrics"] = result.metrics.model_dump()
+            job["status"] = "done"
+            m = result.metrics
+            self._note("info", f"backtest {job['fund']}: {m.total_return_pct:+.1%} vs {spec.benchmark} "
+                               f"{m.benchmark_return_pct:+.1%}, sharpe {m.sharpe_ratio:.2f}, "
+                               f"max drawdown {m.max_drawdown_pct:.1%}")
+            try:
+                self.mandates_dir.mkdir(parents=True, exist_ok=True)
+                stamp = self.clock().strftime("%Y-%m-%d-%H%M%S")
+                (self.mandates_dir / f"{spec.name}-backtest-{stamp}.json").write_text(result.model_dump_json(indent=2))
+            except OSError as exc:
+                self._note("warn", f"could not save backtest receipt: {exc}")
+        except Exception as exc:
+            job["status"] = "failed"
+            job["error"] = str(exc)
+            job["trace"] = traceback.format_exc()
+            self._note("error", f"backtest {job['fund']} failed: {exc}")
+        finally:
+            close = getattr(getattr(client, "_client", None), "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+
+    def backtest_cycle(self, job_id: str, index: int) -> dict:
+        """One tick of a finished backtest, as the full record the cycle view renders."""
+        job = self._job(job_id)
+        result = job.get("result")
+        if result is None:
+            raise ValueError("backtest has not finished")
+        return json.loads(result.records[index].model_dump_json())
+
     def preview(self, spec: FundSpec, broker: Broker, universe: list[str]) -> CycleRecord:
         """run_cycle against a copy of *broker*'s book: real decisions, no orders sent."""
         dry = SimBroker.from_book(broker.cash(), broker.positions())
@@ -514,7 +592,10 @@ class Desk:
         return self.jobs[job_id]
 
     def _job_view(self, job: dict, with_record: bool = True) -> dict:
-        view = {k: v for k, v in job.items() if k not in ("record", "trace", "book")}
+        view = {k: v for k, v in job.items() if k not in ("record", "trace", "book", "result")}
+        if not with_record:
+            for heavy in ("dates", "nav", "benchmark_nav", "cycles"):
+                view.pop(heavy, None)
         record: CycleRecord | None = job.get("record")
         if record is not None:
             view["n_orders"] = len(record.orders)
@@ -535,3 +616,19 @@ class Desk:
     def _note(self, level: str, message: str) -> None:
         self.log.appendleft({"time": datetime.now().isoformat(timespec="seconds"),
                              "level": level, "message": message})
+
+
+def _cycle_summary(record: CycleRecord) -> dict:
+    """One backtest tick in a line: what the book did and why, compactly."""
+    w = record.final_weights
+    views: dict[str, list[float]] = {}
+    for sr in record.strategies:
+        for sig in sr.signals:
+            if not sig.metadata.get("abstained"):
+                views.setdefault(sig.model_name, []).append(sig.value)
+    return {
+        "date": record.as_of, "nav": record.nav, "orders": len(record.orders),
+        "gross": sum(abs(v) for v in w.values()), "net": sum(w.values()),
+        "top": sorted(((t, v) for t, v in w.items() if v), key=lambda x: -abs(x[1]))[:4],
+        "views": {m: sum(v) / len(v) for m, v in views.items()},
+    }

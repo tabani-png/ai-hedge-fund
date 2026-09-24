@@ -220,12 +220,14 @@ def _simulate(argv: list[str]) -> None:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--crash-week", type=int, default=40, help="week of a -26%% market crash (-1 for none)")
     parser.add_argument("--max-drawdown", type=float, default=0.20, help="drawdown breaker threshold (default 0.20)")
+    parser.add_argument("--backtest-weeks", type=int, default=52,
+                        help="backtest each fund over this many weeks before the forward run (0 to skip)")
     parser.add_argument("--serve", action="store_true", help="open the trading desk on the simulated books afterwards")
     args = parser.parse_args(argv)
     from hedge_fund.desk.simulation import print_report, simulate
 
     report = simulate(args.weeks, args.seed, None if args.crash_week < 0 else args.crash_week,
-                      max_drawdown=args.max_drawdown)
+                      max_drawdown=args.max_drawdown, backtest_weeks=args.backtest_weeks)
     print_report(report)
     if args.serve:
         from hedge_fund.web import serve

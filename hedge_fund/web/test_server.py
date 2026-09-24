@@ -65,3 +65,21 @@ def test_cycle_approve_over_http(base):
 def test_bad_input_is_400(base):
     assert _post(base + "/api/order", {"fund": "f", "broker": "paper", "ticker": "AAPL", "side": "hold", "quantity": 1})[0] == 400
     assert _post(base + "/api/keys", {"name": "PATH", "value": "x"})[0] == 400
+
+
+def test_backtest_over_http(base):
+    from datetime import date, timedelta
+    end = date.today().isoformat()
+    start = (date.today() - timedelta(weeks=6)).isoformat()
+    status, out = _post(base + "/api/backtest", {"fund": "f", "tickers": "AAPL", "start": start, "end": end})
+    assert status == 200
+    for _ in range(300):
+        job = json.loads(_get(f"{base}/api/job?id={out['job']}")[1])
+        if job["status"] != "running":
+            break
+        time.sleep(0.01)
+    assert job["status"] == "done", job
+    assert job["metrics"]["n_cycles"] == len(job["nav"]) == len(job["cycles"]) >= 1
+    tick = json.loads(_get(f"{base}/api/backtest-cycle?id={out['job']}&i=0")[1])
+    assert tick["fund"] == "f" and tick["strategies"]
+    assert _post(base + "/api/backtest", {"fund": "f", "tickers": "AAPL", "start": end, "end": start})[0] == 400

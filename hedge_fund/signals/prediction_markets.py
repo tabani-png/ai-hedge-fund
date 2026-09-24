@@ -13,8 +13,10 @@ market pulls every name toward short; an 80% rate-cut market pushes toward
 long. Blended at a modest weight it acts as a regime tilt on the stock
 pickers, not a stock picker itself.
 
-Point-in-time: live odds are only known today. For any past as-of date the
-model abstains — a backtest never sees tomorrow's crowd.
+Point-in-time: today's cycle reads live odds; a backtest's past cycle reads
+the market's daily candle on or before that date (PmxtOdds.quote_at), so it
+never sees tomorrow's crowd. No candle that far back -> that event is skipped;
+no events at all -> abstain.
 """
 
 from __future__ import annotations
@@ -53,24 +55,21 @@ class PredictionMarketModel(AlphaModel):
         return "prediction_markets"
 
     def predict(self, ticker: str, date: str, data_client: DataClient) -> Signal:
-        if date < _date.today().isoformat():
-            return self._signal(ticker, date, 0.0, "Live odds only exist today — abstaining on a past date "
-                                "(no lookahead).", abstained=True)
         if date not in self._by_date:  # one odds read per cycle, shared by every ticker
-            self._by_date[date] = self._read()
+            self._by_date[date] = self._read(None if date >= _date.today().isoformat() else date)
         value, reasoning, abstained = self._by_date[date]
         return self._signal(ticker, date, value, reasoning, abstained)
 
-    def _read(self) -> tuple[float, str, bool]:
+    def _read(self, as_of: str | None) -> tuple[float, str, bool]:
         lines, num, den = [], 0.0, 0.0
         for ev in self.events:
             try:
-                q = self.odds.quote(ev["query"])
+                q = self.odds.quote(ev["query"]) if as_of is None else self.odds.quote_at(ev["query"], as_of)
             except Exception as exc:
                 lines.append(f"- {ev['query']}: unavailable ({exc})")
                 continue
             if q is None:
-                lines.append(f"- {ev['query']}: no market found")
+                lines.append(f"- {ev['query']}: no market found" + (f" with odds by {as_of}" if as_of else ""))
                 continue
             p = self.calibration(q.price)
             w = float(ev.get("weight", 1.0))

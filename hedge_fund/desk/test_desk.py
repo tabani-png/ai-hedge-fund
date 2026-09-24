@@ -14,13 +14,23 @@ from hedge_fund.desk.desk import Desk, us_market_open
 from hedge_fund.fund.spec import Fund
 from hedge_fund.models import Signal
 
-CLOSES = {"AAPL": 200.0, "MSFT": 400.0}
+CLOSES = {"AAPL": 200.0, "MSFT": 400.0, "SPY": 500.0}
 
 
 class FakeData:
+    """Flat daily closes on every weekday in the requested window."""
+
     def get_prices(self, ticker, start, end, **kw):
+        from datetime import date, timedelta
         c = CLOSES.get(ticker)
-        return [] if c is None else [Price(open=c, close=c, high=c, low=c, volume=1, time=f"{end}T00:00:00Z")]
+        if c is None:
+            return []
+        d, last, bars = date.fromisoformat(start), date.fromisoformat(end), []
+        while d <= last:
+            if d.weekday() < 5:
+                bars.append(Price(open=c, close=c, high=c, low=c, volume=1, time=f"{d}T00:00:00Z"))
+            d += timedelta(days=1)
+        return bars
 
 
 class Bull:

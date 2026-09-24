@@ -80,6 +80,8 @@ def handle_post(desk: Desk, path: str, body: dict) -> dict:
         job_id = desk.start_cycle(body["fund"], _tickers(body), body["broker"],
                                   auto_execute=bool(body.get("auto_execute")))
         return {"job": job_id}
+    if path == "/api/backtest":
+        return {"job": desk.start_backtest(body["fund"], _tickers(body), body["start"], body["end"])}
     if path == "/api/approve":
         return desk.approve(body["id"])
     if path == "/api/reject":
@@ -154,6 +156,11 @@ def make_handler(desk: Desk):
                 return self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
             if url.path == "/api/state":
                 return self._json(200, state(desk, q.get("fund"), q.get("broker")))
+            if url.path == "/api/backtest-cycle":
+                try:
+                    return self._json(200, desk.backtest_cycle(q.get("id", ""), int(q.get("i", 0))))
+                except (KeyError, ValueError, IndexError) as exc:
+                    return self._json(404, {"error": str(exc)})
             if url.path == "/api/job":
                 try:
                     return self._json(200, desk._job_view(desk._job(q.get("id", ""))))
