@@ -397,7 +397,11 @@ function renderCycle() {
   $("cycleMeta").textContent = `${j.fund} · ${j.kind === "backtest" ? `backtest ${j.start} → ${j.end}` : S.brokers[j.broker]?.label || j.broker} · ${j.universe.join(", ")}`;
   let h = "";
   if (j.status === "running") h += `<div class="banner"><span class="spin"></span> The agents are researching ${esc(j.universe.join(", "))}… this can take a minute or two.</div>`;
-  if (j.status === "failed" || j.status === "stale") h += `<div class="banner live">${esc(j.error || label)}</div>`;
+  if (j.status === "failed" || j.status === "stale") {
+    const needsKey = /API_KEY|SECRET_KEY|not found\. Set it|api key/i.test(j.error || "");
+    h += `<div class="banner live row"><div><b>${j.kind === "backtest" ? "Backtest" : "Cycle"} ${esc(label.toLowerCase())}:</b> ${esc(j.error || "")}</div>` +
+      (needsKey ? `<button class="btn" id="fixKeys">Add keys in Settings</button>` : "") + `</div>`;
+  }
   const r = j.record;
   if (j.kind === "backtest") h += backtestHtml(j);
   else if (r) h += recordHtml(r, j);
@@ -405,6 +409,7 @@ function renderCycle() {
   $("approveBtn")?.addEventListener("click", () => act(() => api("/api/approve", { id: j.id }), "Approved — sending orders"));
   $("rejectBtn")?.addEventListener("click", () => act(() => api("/api/reject", { id: j.id }), "Rejected"));
   if (j.kind === "backtest") wireBacktest(j);
+  $("fixKeys")?.addEventListener("click", () => $("settingsBtn").click());
 }
 
 function recordHtml(r, j) {

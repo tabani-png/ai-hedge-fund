@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -151,22 +152,30 @@ def make_handler(desk: Desk):
 
         def do_GET(self):
             url = urlparse(self.path)
+            path = url.path.rstrip("/ ") or "/"
             q = {k: v[0] for k, v in parse_qs(url.query).items()}
-            if url.path in ("/", "/index.html"):
+            try:
+                if path == "/api/state":
+                    return self._json(200, state(desk, q.get("fund"), q.get("broker")))
+                if path == "/api/backtest-cycle":
+                    try:
+                        return self._json(200, desk.backtest_cycle(q.get("id", ""), int(q.get("i", 0))))
+                    except (KeyError, ValueError, IndexError) as exc:
+                        return self._json(404, {"error": str(exc)})
+                if path == "/api/job":
+                    try:
+                        return self._json(200, desk._job_view(desk._job(q.get("id", ""))))
+                    except KeyError as exc:
+                        return self._json(404, {"error": str(exc)})
+                if path.startswith("/api/"):
+                    print(f"[aihf web] 404 for GET {self.path!r}", file=sys.stderr)
+                    return self._json(404, {"error": f"no API route {url.path}"})
+                # Anything else is the dashboard: /, /index.html, /desk, a
+                # stray trailing slash or query — never a bare JSON 404 page.
                 return self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
-            if url.path == "/api/state":
-                return self._json(200, state(desk, q.get("fund"), q.get("broker")))
-            if url.path == "/api/backtest-cycle":
-                try:
-                    return self._json(200, desk.backtest_cycle(q.get("id", ""), int(q.get("i", 0))))
-                except (KeyError, ValueError, IndexError) as exc:
-                    return self._json(404, {"error": str(exc)})
-            if url.path == "/api/job":
-                try:
-                    return self._json(200, desk._job_view(desk._job(q.get("id", ""))))
-                except KeyError as exc:
-                    return self._json(404, {"error": str(exc)})
-            return self._json(404, {"error": "not found"})
+            except Exception as exc:
+                traceback.print_exc()
+                return self._json(500, {"error": str(exc)})
 
         def do_POST(self):
             if self.headers.get("X-AIHF") != "1":
@@ -199,10 +208,18 @@ def make_handler(desk: Desk):
 
 def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False,
           desk: Desk | None = None) -> None:
+    page = STATIC / "index.html"
+    if not page.exists():
+        raise SystemExit(f"dashboard page missing at {page} — reinstall from the repo (poetry install)")
     desk = desk or Desk()
-    httpd = ThreadingHTTPServer((host, port), make_handler(desk))
+    try:
+        httpd = ThreadingHTTPServer((host, port), make_handler(desk))
+    except OSError as exc:
+        raise SystemExit(f"port {port} is busy ({exc}) — another server is already running there; "
+                         f"stop it or use: aihf web --port {port + 1}")
     url = f"http://{host}:{port}"
     print(f"AI Hedge Fund trading desk → {url}   (ctrl+c to stop)")
+    print(f"serving {page}")
     if open_browser:
         webbrowser.open(url)
     try:
